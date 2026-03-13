@@ -1,26 +1,387 @@
-from rest_framework import viewsets, status
+import math
+from django.db import transaction
+from django.db.models import F, Q
+from django.utils import timezone
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
+
 from .models import (
-    Hostel, FoodOutlet, Order, HelpRequest,
-    LostFoundItem, MarketplaceListing, Doctor, CampusEvent
+    User, HelpRequest, PasswordResetToken,
+    Hostel, FoodOutlet, Order, LostFoundItem,
+    MarketplaceListing, Doctor, CampusEvent,
+    PICKUP_CHOICES,
 )
 from .serializers import (
+    RegisterSerializer, UserProfileSerializer,
+    ChangePasswordSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
+    HelpRequestCreateSerializer, HelpRequestSerializer,
     HostelSerializer, FoodOutletSerializer, OrderSerializer,
-    HelpRequestSerializer, LostFoundSerializer, MarketplaceSerializer,
-    DoctorSerializer, EventSerializer
+    LostFoundSerializer, MarketplaceSerializer, DoctorSerializer, EventSerializer,
 )
 
-# Dummy data fallback when DB is empty
+
+# ---------------------------------------------------------------------------
+# Haversine distance (returns metres)
+# ---------------------------------------------------------------------------
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6_371_000  # Earth radius in metres
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# Exact coordinates for the three fixed pickup locations
+PICKUP_COORDS = {
+    'main_gate':    (19.12845641460189,  72.91926132752846),
+    'gulmohar':     (19.129814529274448, 72.91533444403758),
+    'shree_balaji': (19.135117507090506, 72.90574766165889),
+}
+
+ACCEPT_RADIUS_METRES = 200
+
+
+# ---------------------------------------------------------------------------
+# Auth Views
+# ---------------------------------------------------------------------------
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'user': UserProfileSerializer(user).data,
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }, status=status.HTTP_201_CREATED)
+
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = request.data.get('username', '').strip()
+        password = request.data.get('password', '')
+        if not username or not password:
+            return Response({'detail': 'Username and password are required.'}, status=400)
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({'detail': 'Invalid credentials.'}, status=400)
+
+        if not user.check_password(password):
+            return Response({'detail': 'Invalid credentials.'}, status=400)
+
+        if not user.is_active:
+            return Response({'detail': 'Account is disabled.'}, status=403)
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'user': UserProfileSerializer(user).data,
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        })
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        refresh_token = request.data.get('refresh')
+        if not refresh_token:
+            return Response({'detail': 'Refresh token required.'}, status=400)
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except TokenError:
+            pass  # Already blacklisted or invalid — still treat as logged out
+        return Response({'detail': 'Logged out successfully.'})
+
+
+class UserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(UserProfileSerializer(request.user).data)
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        if not user.check_password(serializer.validated_data['old_password']):
+            return Response({'detail': 'Old password is incorrect.'}, status=400)
+        user.set_password(serializer.validated_data['new_password'])
+        user.save()
+        return Response({'detail': 'Password changed successfully.'})
+
+
+class ForgotPasswordView(APIView):
+    """
+    Token-based password reset (no email server required in dev).
+    Returns the reset token in the response. In production, email it instead.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        username = serializer.validated_data['username']
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            # Don't reveal whether user exists
+            return Response({'detail': 'If that account exists, a reset token has been generated.'})
+
+        token_obj = PasswordResetToken.objects.create(user=user)
+        # In production: send token_obj.token via email
+        return Response({
+            'detail': 'Reset token generated. Copy this token to reset your password.',
+            'reset_token': str(token_obj.token),  # Remove in production
+        })
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            token_obj = PasswordResetToken.objects.select_related('user').get(
+                token=serializer.validated_data['token']
+            )
+        except PasswordResetToken.DoesNotExist:
+            return Response({'detail': 'Invalid or expired reset token.'}, status=400)
+
+        if not token_obj.is_valid():
+            return Response({'detail': 'Reset token has expired or already been used.'}, status=400)
+
+        user = token_obj.user
+        user.set_password(serializer.validated_data['new_password'])
+        user.save()
+        token_obj.used = True
+        token_obj.save(update_fields=['used'])
+        return Response({'detail': 'Password reset successfully. You can now log in.'})
+
+
+# ---------------------------------------------------------------------------
+# Help Request ViewSet
+# ---------------------------------------------------------------------------
+
+class HelpRequestViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def _expire_pending(self, qs):
+        """Bulk-expire any PENDING requests whose to_time has passed."""
+        now = timezone.now()
+        expired_ids = qs.filter(
+            status=HelpRequest.STATUS_PENDING, to_time__lte=now
+        ).values_list('id', flat=True)
+        if expired_ids:
+            HelpRequest.objects.filter(id__in=expired_ids).update(status=HelpRequest.STATUS_EXPIRED)
+
+    # GET /api/help/
+    def list(self, request):
+        """Return all PENDING requests that haven't expired, auto-expiring stale ones."""
+        qs = HelpRequest.objects.select_related('requester', 'helper')
+        self._expire_pending(qs)
+        pending = qs.filter(status=HelpRequest.STATUS_PENDING)
+        serializer = HelpRequestSerializer(pending, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    # POST /api/help/
+    def create(self, request):
+        serializer = HelpRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        help_req = serializer.save(requester=request.user)
+        return Response(
+            HelpRequestSerializer(help_req, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # POST /api/help/{id}/accept/
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        """
+        Atomic acceptance with:
+          1. Duplicate-accept guard (user already has an ACCEPTED request)
+          2. Single-accept guard (request already taken)
+          3. Haversine distance check (must be within 200m of pickup)
+        """
+        latitude  = request.data.get('latitude')
+        longitude = request.data.get('longitude')
+
+        if latitude is None or longitude is None:
+            return Response(
+                {'detail': 'Your current latitude and longitude are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user_lat = float(latitude)
+            user_lon = float(longitude)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Invalid coordinates.'}, status=400)
+
+        with transaction.atomic():
+            # Lock user's existing accepted requests to prevent races
+            already_helping = HelpRequest.objects.select_for_update().filter(
+                helper=request.user, status=HelpRequest.STATUS_ACCEPTED
+            ).exists()
+            if already_helping:
+                return Response(
+                    {'detail': 'You already have an active accepted request. Complete it first.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            # Lock the target request row
+            try:
+                help_req = HelpRequest.objects.select_for_update().get(pk=pk)
+            except HelpRequest.DoesNotExist:
+                return Response({'detail': 'Request not found.'}, status=404)
+
+            if help_req.requester_id == request.user.id:
+                return Response({'detail': 'You cannot accept your own request.'}, status=400)
+
+            if help_req.status != HelpRequest.STATUS_PENDING:
+                return Response(
+                    {'detail': f'Request is {help_req.status.lower()}, not available.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            if help_req.is_expired():
+                help_req.status = HelpRequest.STATUS_EXPIRED
+                help_req.save(update_fields=['status'])
+                return Response({'detail': 'Request has expired.'}, status=410)
+
+            # Distance check
+            pickup_coords = PICKUP_COORDS.get(help_req.pickup_location)
+            if pickup_coords:
+                dist = haversine(user_lat, user_lon, *pickup_coords)
+                if dist > ACCEPT_RADIUS_METRES:
+                    return Response(
+                        {
+                            'detail': (
+                                f'You are {dist:.0f}m from {help_req.get_pickup_location_display()}. '
+                                f'Must be within {ACCEPT_RADIUS_METRES}m to accept.'
+                            )
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            help_req.helper = request.user
+            help_req.status = HelpRequest.STATUS_ACCEPTED
+            help_req.save(update_fields=['helper', 'status'])
+
+        return Response(
+            HelpRequestSerializer(help_req, context={'request': request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    # POST /api/help/{id}/complete/
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Only the requester can mark their own request as complete."""
+        try:
+            help_req = HelpRequest.objects.get(pk=pk)
+        except HelpRequest.DoesNotExist:
+            return Response({'detail': 'Request not found.'}, status=404)
+
+        if help_req.requester_id != request.user.id:
+            return Response({'detail': 'Only the requester can mark this as complete.'}, status=403)
+
+        if help_req.status != HelpRequest.STATUS_ACCEPTED:
+            return Response(
+                {'detail': 'Request must be in ACCEPTED state to complete.'},
+                status=400,
+            )
+
+        with transaction.atomic():
+            help_req.status = HelpRequest.STATUS_COMPLETED
+            help_req.save(update_fields=['status'])
+            # Award +1 point to helper (F() avoids stale-read race condition)
+            if help_req.helper:
+                User.objects.filter(pk=help_req.helper_id).update(points=F('points') + 1)
+
+        return Response(
+            HelpRequestSerializer(help_req, context={'request': request}).data
+        )
+
+    # GET /api/help/mine/
+    @action(detail=False, methods=['get'])
+    def mine(self, request):
+        """Active requests where user is requester OR helper (not completed/expired)."""
+        now = timezone.now()
+        # Auto-expire any overdue PENDING requests involving this user
+        HelpRequest.objects.filter(
+            Q(requester=request.user) | Q(helper=request.user),
+            status=HelpRequest.STATUS_PENDING,
+            to_time__lte=now,
+        ).update(status=HelpRequest.STATUS_EXPIRED)
+
+        qs = HelpRequest.objects.select_related('requester', 'helper').filter(
+            Q(requester=request.user) | Q(helper=request.user),
+            status__in=[HelpRequest.STATUS_PENDING, HelpRequest.STATUS_ACCEPTED],
+        )
+        serializer = HelpRequestSerializer(qs, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    # GET /api/help/history/
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        """COMPLETED or EXPIRED requests involving this user."""
+        qs = HelpRequest.objects.select_related('requester', 'helper').filter(
+            Q(requester=request.user) | Q(helper=request.user),
+            status__in=[HelpRequest.STATUS_COMPLETED, HelpRequest.STATUS_EXPIRED],
+        )
+        serializer = HelpRequestSerializer(qs, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    # GET /api/help/admin_list/
+    @action(detail=False, methods=['get'], permission_classes=[IsAdminUser])
+    def admin_list(self, request):
+        """All requests — admin only."""
+        qs = HelpRequest.objects.select_related('requester', 'helper').all()
+        serializer = HelpRequestSerializer(qs, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
+# Legacy Campus ViewSets (unchanged, now require JWT auth)
+# ---------------------------------------------------------------------------
+
 DUMMY_HOSTELS = [
-    {'id': i, 'name': f'Hostel {i}', 'capacity': 400, 'occupancy': 380, 'warden_contact': '', 'occupancy_percent': 95}
+    {'id': i, 'name': f'Hostel {i}', 'capacity': 400, 'occupancy': 380,
+     'warden_contact': '', 'occupancy_percent': 95}
     for i in range(1, 7)
 ]
 
 DUMMY_OUTLETS = [
-    {'id': 1, 'name': 'Central Canteen', 'icon': '🍽️', 'outlet_type': 'canteen', 'hours': '8 AM – 10 PM', 'status': 'open', 'items': [{'id': 1, 'name': 'Veg Thali', 'price': '80.00', 'is_available': True}]},
-    {'id': 2, 'name': 'Juice Center',    'icon': '🥤', 'outlet_type': 'cafe',    'hours': '9 AM – 9 PM',  'status': 'open', 'items': [{'id': 2, 'name': 'Mango Shake', 'price': '50.00', 'is_available': True}]},
-    {'id': 3, 'name': 'Night Canteen',   'icon': '🌙', 'outlet_type': 'night',   'hours': '8 PM – 2 AM',  'status': 'open', 'items': [{'id': 3, 'name': 'Maggi', 'price': '40.00', 'is_available': True}]},
+    {'id': 1, 'name': 'Central Canteen', 'icon': '🍽️', 'outlet_type': 'canteen',
+     'hours': '8 AM – 10 PM', 'status': 'open',
+     'items': [{'id': 1, 'name': 'Veg Thali', 'price': '80.00', 'is_available': True}]},
+    {'id': 2, 'name': 'Juice Center', 'icon': '🥤', 'outlet_type': 'cafe',
+     'hours': '9 AM – 9 PM', 'status': 'open',
+     'items': [{'id': 2, 'name': 'Mango Shake', 'price': '50.00', 'is_available': True}]},
+    {'id': 3, 'name': 'Night Canteen', 'icon': '🌙', 'outlet_type': 'night',
+     'hours': '8 PM – 2 AM', 'status': 'open',
+     'items': [{'id': 3, 'name': 'Maggi', 'price': '40.00', 'is_available': True}]},
 ]
 
 
@@ -54,19 +415,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({'message': 'Order placed!', 'order': serializer.data}, status=status.HTTP_201_CREATED)
-
-
-class HelpRequestViewSet(viewsets.ModelViewSet):
-    queryset = HelpRequest.objects.all().order_by('-created_at')
-    serializer_class = HelpRequestSerializer
-
-    @action(detail=True, methods=['post'])
-    def accept(self, request, pk=None):
-        req = self.get_object()
-        req.status = 'accepted'
-        req.save()
-        return Response({'message': f'Request {pk} accepted!'})
+        return Response(
+            {'message': 'Order placed!', 'order': serializer.data},
+            status=status.HTTP_201_CREATED
+        )
 
 
 class LostFoundViewSet(viewsets.ModelViewSet):
@@ -87,8 +439,10 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
         qs = self.get_queryset()
         if not qs.exists():
             return Response([
-                {'id': 1, 'name': 'Dr. Sharma', 'specialization': 'General Physician', 'status': 'available', 'timings': '9 AM – 5 PM'},
-                {'id': 2, 'name': 'Dr. Mehta',  'specialization': 'Dermatologist',    'status': 'busy',      'timings': 'Mon, Wed, Fri'},
+                {'id': 1, 'name': 'Dr. Sharma', 'specialization': 'General Physician',
+                 'status': 'available', 'timings': '9 AM – 5 PM'},
+                {'id': 2, 'name': 'Dr. Mehta', 'specialization': 'Dermatologist',
+                 'status': 'busy', 'timings': 'Mon, Wed, Fri'},
             ])
         return Response(DoctorSerializer(qs, many=True).data)
 

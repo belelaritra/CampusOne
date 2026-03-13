@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router-dom';
-import { useApp } from '../context/AppContext.jsx';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const NAV_ITEMS = [
   { to: '/',           icon: '📊', label: 'Dashboard' },
@@ -18,7 +18,13 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
-  const { user } = useApp();
+  const { user, logout } = useAuth();
+  const navigate          = useNavigate();
+
+  async function handleLogout() {
+    await logout();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <aside className="sidebar">
@@ -47,13 +53,31 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="user-profile">
-          <div className="user-avatar">👤</div>
-          <div className="user-info">
-            <p className="user-name">{user.name}</p>
-            <p className="user-roll">{user.roll}</p>
+        {/* Clickable profile card navigates to /profile */}
+        <NavLink to="/profile" className="user-profile" style={{ textDecoration: 'none', cursor: 'pointer' }}>
+          <div className="user-avatar" style={{
+            background: 'var(--iitb-blue-primary, #003366)',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: '50%', width: 36, height: 36, fontWeight: 700, fontSize: '1rem',
+          }}>
+            {user?.username?.[0]?.toUpperCase() || '?'}
           </div>
-        </div>
+          <div className="user-info">
+            <p className="user-name">{user?.username || 'User'}</p>
+            <p className="user-roll">⭐ {user?.points ?? 0} pts</p>
+          </div>
+        </NavLink>
+        <button
+          onClick={handleLogout}
+          title="Sign out"
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: '1.1rem', padding: '0.25rem 0.5rem',
+            color: 'var(--text-secondary)', marginLeft: '0.25rem',
+          }}
+        >
+          🚪
+        </button>
       </div>
     </aside>
   );
