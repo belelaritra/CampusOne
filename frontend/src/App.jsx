@@ -1,5 +1,16 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import MainLayout from './layouts/MainLayout.jsx';
+import ProtectedRoute from './components/ProtectedRoute.jsx';
+import { useAuth } from './context/AuthContext.jsx';
+import { setTokenGetter, setRefreshFn } from './services/api.js';
+
+// Public pages
+import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
+
+// Protected pages
 import Dashboard from './pages/Dashboard.jsx';
 import Hostels from './pages/Hostels.jsx';
 import FoodOrdering from './pages/FoodOrdering.jsx';
@@ -13,25 +24,47 @@ import LostFound from './pages/LostFound.jsx';
 import Contacts from './pages/Contacts.jsx';
 import Marketplace from './pages/Marketplace.jsx';
 import Events from './pages/Events.jsx';
+import Profile from './pages/Profile.jsx';
 
 export default function App() {
+  const { accessToken, refreshAccessToken } = useAuth();
+
+  // Wire the Axios interceptors to the live auth state
+  useEffect(() => {
+    setTokenGetter(() => accessToken);
+  }, [accessToken]);
+
+  useEffect(() => {
+    setRefreshFn(refreshAccessToken);
+  }, [refreshAccessToken]);
+
   return (
     <Routes>
-      <Route path="/" element={<MainLayout />}>
-        <Route index element={<Dashboard />} />
-        <Route path="hostels" element={<Hostels />} />
-        <Route path="food" element={<FoodOrdering />} />
-        <Route path="map" element={<CampusMap />} />
-        <Route path="help" element={<HelpDelivery />} />
-        <Route path="groups" element={<Groups />} />
-        <Route path="courses" element={<Courses />} />
-        <Route path="hospital" element={<Hospital />} />
-        <Route path="buggy" element={<BuggyPass />} />
-        <Route path="lostfound" element={<LostFound />} />
-        <Route path="contacts" element={<Contacts />} />
-        <Route path="marketplace" element={<Marketplace />} />
-        <Route path="events" element={<Events />} />
+      {/* Public routes */}
+      <Route path="/login"           element={<Login />} />
+      <Route path="/register"        element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+
+      {/* Protected routes */}
+      <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+        <Route index                 element={<Dashboard />} />
+        <Route path="hostels"        element={<Hostels />} />
+        <Route path="food"           element={<FoodOrdering />} />
+        <Route path="map"            element={<CampusMap />} />
+        <Route path="help"           element={<HelpDelivery />} />
+        <Route path="groups"         element={<Groups />} />
+        <Route path="courses"        element={<Courses />} />
+        <Route path="hospital"       element={<Hospital />} />
+        <Route path="buggy"          element={<BuggyPass />} />
+        <Route path="lostfound"      element={<LostFound />} />
+        <Route path="contacts"       element={<Contacts />} />
+        <Route path="marketplace"    element={<Marketplace />} />
+        <Route path="events"         element={<Events />} />
+        <Route path="profile"        element={<Profile />} />
       </Route>
+
+      {/* Catch-all */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

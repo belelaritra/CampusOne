@@ -1,5 +1,132 @@
 from django.db import models
+from django.contrib.auth.models import AbstractUser
+from django.utils import timezone
 
+
+# ---------------------------------------------------------------------------
+# Custom User
+# ---------------------------------------------------------------------------
+
+class User(AbstractUser):
+    """Extends AbstractUser with phone number and help-points tracking."""
+    phone = models.CharField(max_length=15, blank=True)
+    points = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return self.username
+
+
+# ---------------------------------------------------------------------------
+# Help & Delivery — fixed pickup location choices
+# ---------------------------------------------------------------------------
+
+PICKUP_CHOICES = [
+    ('gulmohar',    'Gulmohar'),
+    ('main_gate',   'Main Gate'),
+    ('shree_balaji','Shree Balaji Fruit & Vegetable'),
+]
+
+# All hostel + campus delivery destinations
+DELIVERY_CHOICES = (
+    ('Hostels', [
+        ('hostel_1',  'Hostel 1'),  ('hostel_2',  'Hostel 2'),
+        ('hostel_3',  'Hostel 3'),  ('hostel_4',  'Hostel 4'),
+        ('hostel_5',  'Hostel 5'),  ('hostel_6',  'Hostel 6'),
+        ('hostel_7',  'Hostel 7'),  ('hostel_8',  'Hostel 8'),
+        ('hostel_9',  'Hostel 9'),  ('hostel_10', 'Hostel 10'),
+        ('hostel_11', 'Hostel 11'), ('hostel_12', 'Hostel 12'),
+        ('hostel_13', 'Hostel 13'), ('hostel_14', 'Hostel 14'),
+        ('hostel_15', 'Hostel 15'), ('hostel_16', 'Hostel 16'),
+        ('hostel_17', 'Hostel 17'), ('hostel_18', 'Hostel 18'),
+        ('hostel_19', 'Hostel 19'), ('hostel_21', 'Hostel 21'),
+        ('tansa_house', 'Tansa House'),
+    ]),
+    ('Academic & Common', [
+        ('kresit',       'KReSIT'),
+        ('sjmsom',       'SJMSOM'),
+        ('lecture_hall', 'Lecture Hall Complex'),
+        ('conv_hall',    'Convocation Hall'),
+        ('main_building','Main Building'),
+        ('central_lib',  'Central Library'),
+        ('sac',          'Students Activity Centre'),
+        ('gymkhana',     'Students Gymkhana'),
+    ]),
+)
+
+class HelpRequest(models.Model):
+    STATUS_PENDING   = 'PENDING'
+    STATUS_ACCEPTED  = 'ACCEPTED'
+    STATUS_COMPLETED = 'COMPLETED'
+    STATUS_EXPIRED   = 'EXPIRED'
+    STATUS_CHOICES = [
+        (STATUS_PENDING,   'Pending'),
+        (STATUS_ACCEPTED,  'Accepted'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_EXPIRED,   'Expired'),
+    ]
+
+    requester        = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='created_requests'
+    )
+    helper           = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='accepted_requests'
+    )
+    item_description = models.CharField(max_length=300)
+    pickup_location  = models.CharField(max_length=30, choices=PICKUP_CHOICES)
+    delivery_location= models.CharField(max_length=30)   # from DELIVERY_CHOICES above
+    contact_number   = models.CharField(max_length=15)
+    additional_info  = models.TextField(blank=True, default='')
+    from_time        = models.DateTimeField()
+    to_time          = models.DateTimeField()
+    status           = models.CharField(
+        max_length=15, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
+    )
+    created_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.status}] {self.item_description} by {self.requester}"
+
+    def is_expired(self):
+        return timezone.now() > self.to_time
+
+    def check_and_expire(self):
+        """Mark as EXPIRED if past to_time and still PENDING. Returns True if expired."""
+        if self.status == self.STATUS_PENDING and self.is_expired():
+            self.status = self.STATUS_EXPIRED
+            self.save(update_fields=['status'])
+            return True
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Password Reset Token (simple token model, no email required in dev)
+# ---------------------------------------------------------------------------
+
+import uuid
+
+class PasswordResetToken(models.Model):
+    user       = models.ForeignKey(User, on_delete=models.CASCADE)
+    token      = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    used       = models.BooleanField(default=False)
+
+    def is_valid(self):
+        """Tokens expire after 15 minutes."""
+        return not self.used and (
+            timezone.now() - self.created_at
+        ).total_seconds() < 900
+
+    def __str__(self):
+        return f"ResetToken({self.user}, used={self.used})"
+
+
+# ---------------------------------------------------------------------------
+# Existing Campus Models (unchanged)
+# ---------------------------------------------------------------------------
 
 class Hostel(models.Model):
     name = models.CharField(max_length=100)
@@ -39,7 +166,7 @@ class Order(models.Model):
     STATUS_CHOICES = [('placed', 'Placed'), ('preparing', 'Preparing'), ('delivered', 'Delivered')]
 
     outlet = models.ForeignKey(FoodOutlet, on_delete=models.SET_NULL, null=True)
-    items = models.JSONField()  # [{name, price}]
+    items = models.JSONField()
     total = models.DecimalField(max_digits=10, decimal_places=2)
     roll_number = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='placed')
@@ -47,23 +174,6 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order #{self.id} by {self.roll_number}"
-
-
-class HelpRequest(models.Model):
-    URGENCY_CHOICES = [('normal', 'Normal'), ('urgent', 'Urgent')]
-    STATUS_CHOICES = [('open', 'Open'), ('accepted', 'Accepted'), ('completed', 'Completed')]
-
-    item = models.CharField(max_length=200)
-    pickup_location = models.CharField(max_length=100)
-    delivery_location = models.CharField(max_length=100)
-    points = models.IntegerField(default=25)
-    urgency = models.CharField(max_length=10, choices=URGENCY_CHOICES, default='normal')
-    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='open')
-    requester_roll = models.CharField(max_length=20)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.item
 
 
 class LostFoundItem(models.Model):
@@ -82,7 +192,10 @@ class LostFoundItem(models.Model):
 
 
 class MarketplaceListing(models.Model):
-    CONDITION_CHOICES = [('like new', 'Like New'), ('good', 'Good'), ('fair', 'Fair'), ('poor', 'Poor')]
+    CONDITION_CHOICES = [
+        ('like new', 'Like New'), ('good', 'Good'),
+        ('fair', 'Fair'), ('poor', 'Poor'),
+    ]
 
     title = models.CharField(max_length=200)
     category = models.CharField(max_length=50)
@@ -98,7 +211,9 @@ class MarketplaceListing(models.Model):
 
 
 class Doctor(models.Model):
-    STATUS_CHOICES = [('available', 'Available'), ('busy', 'Busy'), ('unavailable', 'Unavailable')]
+    STATUS_CHOICES = [
+        ('available', 'Available'), ('busy', 'Busy'), ('unavailable', 'Unavailable'),
+    ]
 
     name = models.CharField(max_length=100)
     specialization = models.CharField(max_length=100)
@@ -110,7 +225,10 @@ class Doctor(models.Model):
 
 
 class CampusEvent(models.Model):
-    CATEGORY_CHOICES = [('technical', 'Technical'), ('cultural', 'Cultural'), ('sports', 'Sports'), ('academic', 'Academic'), ('social', 'Social')]
+    CATEGORY_CHOICES = [
+        ('technical', 'Technical'), ('cultural', 'Cultural'),
+        ('sports', 'Sports'), ('academic', 'Academic'), ('social', 'Social'),
+    ]
 
     name = models.CharField(max_length=200)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
