@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from .models import (
@@ -6,6 +8,8 @@ from .models import (
     LostFoundItem, MarketplaceListing, Doctor, CampusEvent,
     PICKUP_CHOICES, DELIVERY_CHOICES,
 )
+
+DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
 
 
 # ---------------------------------------------------------------------------
@@ -17,7 +21,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'password']
+        fields = ['id', 'username', 'email', 'phone', 'full_name', 'phone_number', 'roll_number', 'password']
         extra_kwargs = {'email': {'required': True}}
 
     def validate_email(self, value):
@@ -30,6 +34,9 @@ class RegisterSerializer(serializers.ModelSerializer):
             username=validated_data['username'],
             email=validated_data['email'],
             phone=validated_data.get('phone', ''),
+            full_name=validated_data.get('full_name', ''),
+            phone_number=validated_data.get('phone_number', ''),
+            roll_number=validated_data.get('roll_number', ''),
             password=validated_data['password'],
         )
 
@@ -37,8 +44,14 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'points']
+        fields = ['id', 'username', 'email', 'phone', 'full_name', 'phone_number', 'roll_number', 'points']
         read_only_fields = fields
+
+
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['full_name', 'phone_number', 'roll_number']
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -64,14 +77,20 @@ _FLAT_DELIVERY_VALUES = [
     v for group in DELIVERY_CHOICES for v, _ in group[1]
 ]
 
+
 class HelpRequestCreateSerializer(serializers.ModelSerializer):
-    """Used for creating a help request. Requester is set from the JWT user."""
+    """
+    Creates a help request.
+    - duration (minutes) replaces to_time; view computes to_time = from_time + duration.
+    - contact_number is auto-populated by the view from requester's profile.
+    """
+    duration = serializers.ChoiceField(choices=DURATION_VALUES)
 
     class Meta:
         model = HelpRequest
         fields = [
             'item_description', 'pickup_location', 'delivery_location',
-            'contact_number', 'additional_info', 'from_time', 'to_time',
+            'additional_info', 'from_time', 'duration',
         ]
 
     def validate_delivery_location(self, value):
@@ -81,45 +100,71 @@ class HelpRequestCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         from django.utils import timezone
-        now = timezone.now()
-        if attrs['from_time'] >= attrs['to_time']:
-            raise serializers.ValidationError("from_time must be before to_time.")
-        if attrs['to_time'] <= now:
-            raise serializers.ValidationError("to_time must be in the future.")
+        to_time = attrs['from_time'] + timedelta(minutes=attrs['duration'])
+        if to_time <= timezone.now():
+            raise serializers.ValidationError("Computed end time must be in the future.")
         return attrs
 
 
-class HelpRequestSerializer(serializers.ModelSerializer):
-    """
-    Full serializer used for list/detail views.
-    contact_number is only exposed to the requester and the accepted helper.
-    """
-    requester_username = serializers.CharField(source='requester.username', read_only=True)
-    helper_username    = serializers.CharField(source='helper.username', read_only=True, allow_null=True)
-    contact_number     = serializers.SerializerMethodField()
-    pickup_location_display   = serializers.CharField(
-        source='get_pickup_location_display', read_only=True
-    )
-    is_expired         = serializers.BooleanField(read_only=True)
+class HelpRequestEditSerializer(serializers.ModelSerializer):
+    """PATCH serializer — requester can edit any subset of these fields on a PENDING request."""
+    duration = serializers.ChoiceField(choices=DURATION_VALUES, required=False)
 
     class Meta:
         model = HelpRequest
         fields = [
-            'id', 'requester_username', 'helper_username',
+            'item_description', 'pickup_location', 'delivery_location',
+            'additional_info', 'from_time', 'duration',
+        ]
+
+    def validate_delivery_location(self, value):
+        if value not in _FLAT_DELIVERY_VALUES:
+            raise serializers.ValidationError(f"Invalid delivery location: {value}")
+        return value
+
+
+class HelpRequestSerializer(serializers.ModelSerializer):
+    """
+    Full read serializer.
+    - contact_number visible only to requester / helper.
+    - distance_in_meters / is_within_range annotated by the list view.
+    """
+    requester_username      = serializers.CharField(source='requester.username', read_only=True)
+    requester_name          = serializers.CharField(source='requester.full_name', read_only=True)
+    requester_roll          = serializers.CharField(source='requester.roll_number', read_only=True)
+    helper_username         = serializers.CharField(source='helper.username', read_only=True, allow_null=True)
+    contact_number          = serializers.SerializerMethodField()
+    pickup_location_display = serializers.CharField(source='get_pickup_location_display', read_only=True)
+    is_expired              = serializers.BooleanField(read_only=True)
+    duration                = serializers.IntegerField(read_only=True)
+    distance_in_meters      = serializers.SerializerMethodField()
+    is_within_range         = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HelpRequest
+        fields = [
+            'id', 'requester_username', 'requester_name', 'requester_roll',
+            'helper_username',
             'item_description', 'pickup_location', 'pickup_location_display',
             'delivery_location', 'contact_number', 'additional_info',
-            'from_time', 'to_time', 'status', 'created_at', 'is_expired',
+            'from_time', 'to_time', 'duration', 'status', 'created_at', 'is_expired',
+            'distance_in_meters', 'is_within_range',
         ]
 
     def get_contact_number(self, obj):
-        """Only the requester and the helper see the raw contact number."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             if obj.requester_id == request.user.id or (
                 obj.helper_id and obj.helper_id == request.user.id
             ):
                 return obj.contact_number
-        return None  # Hidden from everyone else
+        return None
+
+    def get_distance_in_meters(self, obj):
+        return getattr(obj, '_distance_meters', None)
+
+    def get_is_within_range(self, obj):
+        return getattr(obj, '_is_within_range', None)
 
 
 # ---------------------------------------------------------------------------

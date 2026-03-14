@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
+from datetime import timedelta
+
 from .models import (
     User, HelpRequest, PasswordResetToken,
     Hostel, FoodOutlet, Order, LostFoundItem,
@@ -17,9 +19,9 @@ from .models import (
     PICKUP_CHOICES,
 )
 from .serializers import (
-    RegisterSerializer, UserProfileSerializer,
+    RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
     ChangePasswordSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
-    HelpRequestCreateSerializer, HelpRequestSerializer,
+    HelpRequestCreateSerializer, HelpRequestEditSerializer, HelpRequestSerializer,
     HostelSerializer, FoodOutletSerializer, OrderSerializer,
     LostFoundSerializer, MarketplaceSerializer, DoctorSerializer, EventSerializer,
 )
@@ -116,6 +118,13 @@ class UserProfileView(APIView):
     def get(self, request):
         return Response(UserProfileSerializer(request.user).data)
 
+    def patch(self, request):
+        serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        request.user.refresh_from_db()
+        return Response(UserProfileSerializer(request.user).data)
+
 
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
@@ -196,12 +205,49 @@ class HelpRequestViewSet(viewsets.ViewSet):
         if expired_ids:
             HelpRequest.objects.filter(id__in=expired_ids).update(status=HelpRequest.STATUS_EXPIRED)
 
-    # GET /api/help/
+    # GET /api/help/?lat=<float>&lng=<float>
     def list(self, request):
-        """Return all PENDING requests that haven't expired, auto-expiring stale ones."""
+        """
+        Return PENDING requests sorted by proximity then to_time.
+        Accepts optional ?lat=&lng= query params to annotate distance.
+        """
+        user_lat_str = request.query_params.get('lat')
+        user_lon_str = request.query_params.get('lng')
+        has_location = False
+        user_lat = user_lon = None
+
+        if user_lat_str and user_lon_str:
+            try:
+                user_lat = float(user_lat_str)
+                user_lon = float(user_lon_str)
+                has_location = True
+            except (TypeError, ValueError):
+                pass
+
         qs = HelpRequest.objects.select_related('requester', 'helper')
         self._expire_pending(qs)
-        pending = qs.filter(status=HelpRequest.STATUS_PENDING)
+        pending = list(qs.filter(status=HelpRequest.STATUS_PENDING))
+
+        for req in pending:
+            if has_location:
+                coords = PICKUP_COORDS.get(req.pickup_location)
+                if coords:
+                    dist = haversine(user_lat, user_lon, *coords)
+                    req._distance_meters = round(dist)
+                    req._is_within_range = dist <= ACCEPT_RADIUS_METRES
+                else:
+                    req._distance_meters = None
+                    req._is_within_range = False
+            else:
+                req._distance_meters = None
+                req._is_within_range = None
+
+        if has_location:
+            pending.sort(key=lambda r: (
+                0 if getattr(r, '_is_within_range', False) else 1,
+                r.to_time,
+            ))
+
         serializer = HelpRequestSerializer(pending, many=True, context={'request': request})
         return Response(serializer.data)
 
@@ -209,7 +255,19 @@ class HelpRequestViewSet(viewsets.ViewSet):
     def create(self, request):
         serializer = HelpRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        help_req = serializer.save(requester=request.user)
+
+        from_time = serializer.validated_data['from_time']
+        duration  = serializer.validated_data['duration']
+        to_time   = from_time + timedelta(minutes=duration)
+
+        # Auto-populate contact from requester's profile
+        contact = request.user.phone_number or request.user.phone or ''
+
+        help_req = serializer.save(
+            requester=request.user,
+            to_time=to_time,
+            contact_number=contact,
+        )
         return Response(
             HelpRequestSerializer(help_req, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
@@ -319,9 +377,55 @@ class HelpRequestViewSet(viewsets.ViewSet):
             if help_req.helper:
                 User.objects.filter(pk=help_req.helper_id).update(points=F('points') + 1)
 
-        return Response(
-            HelpRequestSerializer(help_req, context={'request': request}).data
-        )
+        data = HelpRequestSerializer(help_req, context={'request': request}).data
+        # Return fresh helper points so frontend can update instantly
+        if help_req.helper_id:
+            data['helper_points'] = User.objects.values_list('points', flat=True).get(
+                pk=help_req.helper_id
+            )
+        return Response(data)
+
+    # PATCH /api/help/{id}/
+    def partial_update(self, request, pk=None):
+        """Requester can edit their own PENDING request."""
+        try:
+            help_req = HelpRequest.objects.get(pk=pk)
+        except HelpRequest.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        if help_req.requester_id != request.user.id:
+            return Response({'detail': 'Only the requester can edit this.'}, status=403)
+        if help_req.status != HelpRequest.STATUS_PENDING:
+            return Response({'detail': 'Only PENDING requests can be edited.'}, status=400)
+
+        serializer = HelpRequestEditSerializer(help_req, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        from_time = serializer.validated_data.get('from_time', help_req.from_time)
+        duration  = serializer.validated_data.get('duration',  help_req.duration)
+        to_time   = from_time + timedelta(minutes=duration)
+
+        if to_time <= timezone.now():
+            return Response({'detail': 'Computed end time must be in the future.'}, status=400)
+
+        updated = serializer.save(to_time=to_time)
+        return Response(HelpRequestSerializer(updated, context={'request': request}).data)
+
+    # DELETE /api/help/{id}/
+    def destroy(self, request, pk=None):
+        """Requester can delete their own PENDING request."""
+        try:
+            help_req = HelpRequest.objects.get(pk=pk)
+        except HelpRequest.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        if help_req.requester_id != request.user.id:
+            return Response({'detail': 'Only the requester can delete this.'}, status=403)
+        if help_req.status != HelpRequest.STATUS_PENDING:
+            return Response({'detail': 'Only PENDING requests can be deleted.'}, status=400)
+
+        help_req.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     # GET /api/help/mine/
     @action(detail=False, methods=['get'])

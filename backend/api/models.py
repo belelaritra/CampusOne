@@ -9,7 +9,10 @@ from django.utils import timezone
 
 class User(AbstractUser):
     """Extends AbstractUser with phone number and help-points tracking."""
-    phone = models.CharField(max_length=15, blank=True)
+    phone = models.CharField(max_length=15, blank=True)          # legacy
+    full_name    = models.CharField(max_length=150, blank=True)
+    phone_number = models.CharField(max_length=15,  blank=True)
+    roll_number  = models.CharField(max_length=20,  blank=True)
     points = models.PositiveIntegerField(default=0)
 
     def __str__(self):
@@ -24,6 +27,16 @@ PICKUP_CHOICES = [
     ('gulmohar',    'Gulmohar'),
     ('main_gate',   'Main Gate'),
     ('shree_balaji','Shree Balaji Fruit & Vegetable'),
+]
+
+DURATION_CHOICES = [
+    (5,   '5 minutes'),
+    (10,  '10 minutes'),
+    (15,  '15 minutes'),
+    (30,  '30 minutes'),
+    (60,  '1 hour'),
+    (90,  '1.5 hours'),
+    (120, '2 hours'),
 ]
 
 # All hostel + campus delivery destinations
@@ -75,10 +88,11 @@ class HelpRequest(models.Model):
     item_description = models.CharField(max_length=300)
     pickup_location  = models.CharField(max_length=30, choices=PICKUP_CHOICES)
     delivery_location= models.CharField(max_length=30)   # from DELIVERY_CHOICES above
-    contact_number   = models.CharField(max_length=15)
+    contact_number   = models.CharField(max_length=15, blank=True)   # auto-populated from requester profile
     additional_info  = models.TextField(blank=True, default='')
     from_time        = models.DateTimeField()
-    to_time          = models.DateTimeField()
+    duration         = models.PositiveIntegerField(choices=DURATION_CHOICES, default=30)
+    to_time          = models.DateTimeField()                          # = from_time + duration
     status           = models.CharField(
         max_length=15, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
     )
