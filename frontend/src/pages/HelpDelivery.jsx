@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { SectionHeader, StatusBadge } from '../components/ui.jsx';
+import { SectionHeader } from '../components/ui.jsx';
 import Tabs from '../components/Tabs.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   getHelpRequests, createHelpRequest, acceptRequest,
-  completeRequest, getMyRequests, getHistory,
+  completeRequest, editRequest, deleteRequest,
+  getMyRequests, getHistory,
 } from '../services/api';
 
 // ---------------------------------------------------------------------------
-// Fixed choices (must match backend)
+// Constants (must match backend)
 // ---------------------------------------------------------------------------
 const PICKUP_OPTIONS = [
   { value: 'gulmohar',     label: 'Gulmohar' },
@@ -18,11 +19,11 @@ const PICKUP_OPTIONS = [
 
 const DELIVERY_OPTIONS = [
   { group: 'Hostels', items: [
-    { value: 'hostel_1', label: 'Hostel 1' },   { value: 'hostel_2', label: 'Hostel 2' },
-    { value: 'hostel_3', label: 'Hostel 3' },   { value: 'hostel_4', label: 'Hostel 4' },
-    { value: 'hostel_5', label: 'Hostel 5' },   { value: 'hostel_6', label: 'Hostel 6' },
-    { value: 'hostel_7', label: 'Hostel 7' },   { value: 'hostel_8', label: 'Hostel 8' },
-    { value: 'hostel_9', label: 'Hostel 9' },   { value: 'hostel_10', label: 'Hostel 10' },
+    { value: 'hostel_1',  label: 'Hostel 1' },  { value: 'hostel_2',  label: 'Hostel 2' },
+    { value: 'hostel_3',  label: 'Hostel 3' },  { value: 'hostel_4',  label: 'Hostel 4' },
+    { value: 'hostel_5',  label: 'Hostel 5' },  { value: 'hostel_6',  label: 'Hostel 6' },
+    { value: 'hostel_7',  label: 'Hostel 7' },  { value: 'hostel_8',  label: 'Hostel 8' },
+    { value: 'hostel_9',  label: 'Hostel 9' },  { value: 'hostel_10', label: 'Hostel 10' },
     { value: 'hostel_11', label: 'Hostel 11' }, { value: 'hostel_12', label: 'Hostel 12' },
     { value: 'hostel_13', label: 'Hostel 13' }, { value: 'hostel_14', label: 'Hostel 14' },
     { value: 'hostel_15', label: 'Hostel 15' }, { value: 'hostel_16', label: 'Hostel 16' },
@@ -42,6 +43,16 @@ const DELIVERY_OPTIONS = [
   ]},
 ];
 
+const DURATION_OPTIONS = [
+  { value: 5,   label: '5 min' },
+  { value: 10,  label: '10 min' },
+  { value: 15,  label: '15 min' },
+  { value: 30,  label: '30 min' },
+  { value: 60,  label: '1 hr' },
+  { value: 90,  label: '1.5 hr' },
+  { value: 120, label: '2 hr' },
+];
+
 function deliveryLabel(value) {
   for (const group of DELIVERY_OPTIONS) {
     const found = group.items.find(i => i.value === value);
@@ -50,16 +61,33 @@ function deliveryLabel(value) {
   return value;
 }
 
-const STATUS_COLORS = {
-  PENDING:   'available',
-  ACCEPTED:  'warning',
-  COMPLETED: 'success',
-  EXPIRED:   'error',
+const STATUS_META = {
+  PENDING:   { color: '#d97706', bg: '#fef3c7', label: 'Pending' },
+  ACCEPTED:  { color: '#2563eb', bg: '#dbeafe', label: 'Accepted' },
+  COMPLETED: { color: '#16a34a', bg: '#dcfce7', label: 'Completed' },
+  EXPIRED:   { color: '#6b7280', bg: '#f3f4f6', label: 'Expired' },
 };
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Helpers
 // ---------------------------------------------------------------------------
+function fmtTime(iso) {
+  return new Date(iso).toLocaleString('en-IN', {
+    hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short',
+  });
+}
+
+function ErrorMsg({ msg }) {
+  if (!msg) return null;
+  return (
+    <div style={{
+      padding: '0.65rem 1rem', borderRadius: 8, marginBottom: '1rem',
+      background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2',
+      color: msg.startsWith('✅') ? '#166534' : '#991b1b',
+      fontSize: '0.875rem',
+    }}>{msg}</div>
+  );
+}
 
 function EmptyState({ icon, text }) {
   return (
@@ -70,63 +98,161 @@ function EmptyState({ icon, text }) {
   );
 }
 
-function RequestCard({ req, currentUser, onAccept, onComplete, actionBusy }) {
+// ---------------------------------------------------------------------------
+// Card grid wrapper
+// ---------------------------------------------------------------------------
+const GRID_STYLE = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: '1rem',
+  alignItems: 'start',
+};
+
+const CARD_STYLE = {
+  background: 'var(--bg-card, #fff)',
+  border: '1px solid var(--border, #e5e7eb)',
+  borderRadius: 16,
+  padding: '1.1rem 1.25rem',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.55rem',
+  transition: 'transform 0.15s, box-shadow 0.15s',
+};
+
+// ---------------------------------------------------------------------------
+// RequestCard
+// ---------------------------------------------------------------------------
+function RequestCard({
+  req, currentUser, hasActiveAccepted,
+  onAccept, onComplete, onEdit, onDelete,
+  actionBusy,
+}) {
   const isRequester = req.requester_username === currentUser?.username;
   const isHelper    = req.helper_username    === currentUser?.username;
+  const meta        = STATUS_META[req.status] || STATUS_META.PENDING;
+
+  // Accept button state
+  const canAccept = !isRequester && !isHelper && req.status === 'PENDING';
+  const outsideRange = req.is_within_range === false;          // null = no location provided
+  const acceptBlocked = hasActiveAccepted || outsideRange;
+
+  let acceptBlockReason = '';
+  if (hasActiveAccepted) acceptBlockReason = 'Complete your current delivery before accepting another';
+  else if (outsideRange && req.distance_in_meters != null)
+    acceptBlockReason = `You are ${req.distance_in_meters}m away (need ≤200m)`;
+  else if (outsideRange)
+    acceptBlockReason = 'You are too far from the pickup point';
+
+  const busy = actionBusy === req.id;
 
   return (
-    <div className="request-card" style={{ marginBottom: '1rem' }}>
-      <div className="request-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <h4 style={{ margin: 0, flex: 1, marginRight: '1rem' }}>{req.item_description}</h4>
-        <span className={`status-badge ${STATUS_COLORS[req.status] || 'available'}`}>
-          {req.status}
-        </span>
+    <div
+      className="help-card"
+      style={{
+        ...CARD_STYLE,
+        ...(busy ? { opacity: 0.7 } : {}),
+      }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = CARD_STYLE.boxShadow; }}
+    >
+      {/* Header: description + status */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+        <strong style={{ fontSize: '0.95rem', lineHeight: 1.3, flex: 1 }}>{req.item_description}</strong>
+        <span style={{
+          fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
+          padding: '0.2rem 0.55rem', borderRadius: 999,
+          background: meta.bg, color: meta.color, whiteSpace: 'nowrap', flexShrink: 0,
+        }}>{meta.label}</span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-        <span>📦 <strong>Pickup:</strong> {req.pickup_location_display}</span>
-        <span>🏠 <strong>Deliver to:</strong> {deliveryLabel(req.delivery_location)}</span>
-        <span>⏰ <strong>From:</strong> {new Date(req.from_time).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</span>
-        <span>⏳ <strong>Until:</strong> {new Date(req.to_time).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</span>
-        <span>👤 <strong>Posted by:</strong> {req.requester_username}</span>
-        {req.helper_username && (
-          <span>🤝 <strong>Helper:</strong> {req.helper_username}</span>
-        )}
+      {/* Route */}
+      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+        📦 <strong>{req.pickup_location_display}</strong> → 🏠 <strong>{deliveryLabel(req.delivery_location)}</strong>
       </div>
 
-      {/* Show contact only to requester or helper */}
+      {/* Time */}
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        ⏰ {fmtTime(req.from_time)}
+        {' '}· {req.duration} min window
+        {' '}→ until {fmtTime(req.to_time)}
+      </div>
+
+      {/* Posted by */}
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        👤 {req.requester_name || req.requester_username}
+        {req.requester_roll ? ` (${req.requester_roll})` : ''}
+        {req.helper_username && <> · 🤝 {req.helper_username}</>}
+      </div>
+
+      {/* Distance badge */}
+      {req.distance_in_meters != null && (
+        <div style={{
+          fontSize: '0.78rem', fontWeight: 600,
+          color: req.is_within_range ? '#15803d' : '#b91c1c',
+          background: req.is_within_range ? '#dcfce7' : '#fee2e2',
+          borderRadius: 6, padding: '0.2rem 0.55rem', alignSelf: 'flex-start',
+        }}>
+          {req.is_within_range ? '✅' : '📍'} {req.distance_in_meters}m away
+        </div>
+      )}
+
+      {/* Contact (only for requester / helper) */}
       {req.contact_number && (isRequester || isHelper) && (
-        <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', background: 'var(--bg-secondary, #f5f5f5)', borderRadius: 8, fontSize: '0.875rem' }}>
-          📞 <strong>Contact:</strong> {req.contact_number}
-          {req.additional_info && (
-            <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>ℹ️ {req.additional_info}</div>
-          )}
+        <div style={{ fontSize: '0.82rem', background: 'var(--bg-secondary,#f8f8f8)', borderRadius: 8, padding: '0.4rem 0.6rem' }}>
+          📞 {req.contact_number}
+          {req.additional_info && <div style={{ marginTop: 2, color: 'var(--text-secondary)' }}>ℹ️ {req.additional_info}</div>}
         </div>
       )}
 
       {/* Actions */}
-      <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem' }}>
-        {/* Requester: mark complete */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+        {/* Mark delivered */}
         {isRequester && req.status === 'ACCEPTED' && (
-          <button
-            className="btn btn-primary"
-            style={{ flex: 1 }}
-            disabled={actionBusy === req.id}
-            onClick={() => onComplete(req.id)}
-          >
-            {actionBusy === req.id ? 'Marking…' : '✅ Mark Delivered'}
+          <button className="btn btn-primary" disabled={busy} onClick={() => onComplete(req.id)}
+            style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem' }}>
+            {busy ? 'Marking…' : '✅ Mark Delivered'}
           </button>
         )}
-        {/* Other user: accept pending */}
-        {!isRequester && !isHelper && req.status === 'PENDING' && onAccept && (
-          <button
-            className="btn btn-primary"
-            style={{ flex: 1 }}
-            disabled={actionBusy === req.id}
-            onClick={() => onAccept(req.id)}
-          >
-            {actionBusy === req.id ? 'Checking location…' : '🚶 Accept & Deliver'}
-          </button>
+
+        {/* Accept */}
+        {canAccept && (
+          <div>
+            <button className="btn btn-primary"
+              disabled={busy || acceptBlocked}
+              onClick={() => onAccept(req.id)}
+              style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem', width: '100%',
+                opacity: acceptBlocked ? 0.5 : 1, cursor: acceptBlocked ? 'not-allowed' : 'pointer' }}>
+              {busy ? 'Checking location…' : '🚶 Accept & Deliver'}
+            </button>
+            {acceptBlocked && acceptBlockReason && (
+              <p style={{ fontSize: '0.73rem', color: '#b91c1c', margin: '0.25rem 0 0' }}>
+                {acceptBlockReason}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Edit / Delete (requester, PENDING only) */}
+        {isRequester && req.status === 'PENDING' && (
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            {onEdit && (
+              <button className="btn" disabled={busy}
+                onClick={() => onEdit(req)}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem', flex: 1 }}>
+                ✏️ Edit
+              </button>
+            )}
+            {onDelete && (
+              <button className="btn"
+                disabled={busy}
+                onClick={() => onDelete(req.id)}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem', flex: 1,
+                  background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
+                🗑️ Delete
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -134,119 +260,46 @@ function RequestCard({ req, currentUser, onAccept, onComplete, actionBusy }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tabs
+// Create / Edit form (shared)
 // ---------------------------------------------------------------------------
+const EMPTY_FORM = {
+  item_description: '', pickup_location: '', delivery_location: '',
+  additional_info: '', from_time: '', duration: 30,
+};
 
-function PendingTab({ user }) {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-  const [actionBusy, setActionBusy] = useState(null);
-  const [actionMsg, setActionMsg]   = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getHelpRequests();
-      setRequests(data);
-    } catch { setError('Failed to load requests.'); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-  // Auto-refresh every 30s
-  useEffect(() => { const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
-
-  async function handleAccept(id) {
-    setActionMsg('');
-    if (!navigator.geolocation) {
-      return setActionMsg('❌ Geolocation is not supported by your browser.');
-    }
-    setActionBusy(id);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          await acceptRequest(id, pos.coords.latitude, pos.coords.longitude);
-          setActionMsg('✅ Request accepted! Check "My Requests" tab.');
-          load();
-        } catch (err) {
-          setActionMsg('❌ ' + (err.response?.data?.detail || 'Could not accept request.'));
-        } finally {
-          setActionBusy(null);
-        }
-      },
-      (geoErr) => {
-        setActionMsg('❌ Location access denied. Allow location to accept requests.');
-        setActionBusy(null);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }
-
-  if (loading) return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
-  if (error)   return <p style={{ color: 'red', padding: '1rem' }}>{error}</p>;
-
-  return (
-    <div>
-      {actionMsg && (
-        <div style={{
-          padding: '0.75rem 1rem', borderRadius: 8, marginBottom: '1rem',
-          background: actionMsg.startsWith('✅') ? '#dcfce7' : '#fee2e2',
-          color: actionMsg.startsWith('✅') ? '#166534' : '#991b1b',
-          fontSize: '0.9rem',
-        }}>
-          {actionMsg}
-        </div>
-      )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
-        <button className="btn" onClick={load} style={{ fontSize: '0.85rem' }}>🔄 Refresh</button>
-      </div>
-      {requests.length === 0
-        ? <EmptyState icon="📭" text="No pending requests right now. Check back soon!" />
-        : requests.map(req => (
-            <RequestCard key={req.id} req={req} currentUser={user} onAccept={handleAccept} actionBusy={actionBusy} />
-          ))
-      }
-    </div>
-  );
-}
-
-function CreateTab({ onCreated }) {
-  const EMPTY = {
-    item_description: '', pickup_location: '', delivery_location: '',
-    contact_number: '', additional_info: '', from_time: '', to_time: '',
-  };
-  const [form, setForm]   = useState(EMPTY);
+function HelpForm({ initial = EMPTY_FORM, onSave, onCancel, isEdit = false }) {
+  const [form, setForm]   = useState({ ...EMPTY_FORM, ...initial });
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [busy, setBusy]   = useState(false);
 
-  const handle = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
+  const handle = e => {
+    const { name, value } = e.target;
+    setForm(p => ({ ...p, [name]: name === 'duration' ? Number(value) : value }));
+  };
 
   async function submit(e) {
     e.preventDefault();
-    setError(''); setSuccess('');
+    setError('');
     if (!form.pickup_location || !form.delivery_location) {
       return setError('Please select both pickup and delivery locations.');
     }
     setBusy(true);
     try {
-      await createHelpRequest({
-        ...form,
-        // Convert local datetime-local input (no timezone) to ISO with offset
-        from_time: new Date(form.from_time).toISOString(),
-        to_time:   new Date(form.to_time).toISOString(),
+      await onSave({
+        item_description:  form.item_description,
+        pickup_location:   form.pickup_location,
+        delivery_location: form.delivery_location,
+        additional_info:   form.additional_info,
+        from_time:         new Date(form.from_time).toISOString(),
+        duration:          Number(form.duration),
       });
-      setSuccess('✅ Your request has been posted! Others nearby can now accept it.');
-      setForm(EMPTY);
-      if (onCreated) onCreated();
     } catch (err) {
       const data = err.response?.data;
       if (data && typeof data === 'object') {
         const msgs = Object.entries(data).map(([k, v]) => `${k}: ${[v].flat().join(', ')}`).join(' | ');
         setError(msgs);
       } else {
-        setError('Failed to create request. Please check all fields.');
+        setError('Failed. Please check all fields.');
       }
     } finally {
       setBusy(false);
@@ -255,8 +308,7 @@ function CreateTab({ onCreated }) {
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 620 }}>
-      {error   && <div className="auth-error">{error}</div>}
-      {success && <div className="auth-success">{success}</div>}
+      <ErrorMsg msg={error} />
 
       <div className="form-group">
         <label>What do you need? *</label>
@@ -288,16 +340,6 @@ function CreateTab({ onCreated }) {
         </div>
       </div>
 
-      <div className="form-group">
-        <label>Your Contact Number *</label>
-        <input name="contact_number" className="search-input" required
-          placeholder="10-digit mobile number" type="tel"
-          value={form.contact_number} onChange={handle} maxLength={15} />
-        <small style={{ color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>
-          Shared only with the person who accepts your request.
-        </small>
-      </div>
-
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
         <div className="form-group">
           <label>Available From *</label>
@@ -305,31 +347,169 @@ function CreateTab({ onCreated }) {
             value={form.from_time} onChange={handle} />
         </div>
         <div className="form-group">
-          <label>Available Until *</label>
-          <input name="to_time" type="datetime-local" className="search-input" required
-            value={form.to_time} onChange={handle} />
+          <label>Duration *</label>
+          <select name="duration" className="category-select" required
+            value={form.duration} onChange={handle}>
+            {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
       </div>
 
       <div className="form-group">
         <label>Additional Info <span style={{ color: 'var(--text-secondary)' }}>(optional)</span></label>
-        <textarea name="additional_info" className="search-input" rows={3} style={{ resize: 'vertical' }}
-          placeholder="Any special instructions, building entrance, room number…"
+        <textarea name="additional_info" className="search-input" rows={3}
+          style={{ resize: 'vertical' }}
+          placeholder="Special instructions, building entrance, room number…"
           value={form.additional_info} onChange={handle} />
       </div>
 
-      <button type="submit" className="btn btn-primary" disabled={busy} style={{ maxWidth: 200 }}>
-        {busy ? 'Posting…' : '📬 Post Request'}
-      </button>
+      <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <button type="submit" className="btn btn-primary" disabled={busy} style={{ maxWidth: 200 }}>
+          {busy ? (isEdit ? 'Saving…' : 'Posting…') : (isEdit ? '💾 Save Changes' : '📬 Post Request')}
+        </button>
+        {onCancel && (
+          <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+        )}
+      </div>
     </form>
   );
 }
 
-function MyRequestsTab({ user }) {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading]   = useState(true);
+// ---------------------------------------------------------------------------
+// useGeolocation hook
+// ---------------------------------------------------------------------------
+function useGeolocation() {
+  const [pos, setPos] = useState(null);     // { lat, lng }
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      p => setPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000 },
+    );
+  }, []);
+
+  const refresh = useCallback(() => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
+    navigator.geolocation.getCurrentPosition(
+      p => { const next = { lat: p.coords.latitude, lng: p.coords.longitude }; setPos(next); resolve(next); },
+      reject,
+      { enableHighAccuracy: true, timeout: 8000 },
+    );
+  }), []);
+
+  return { pos, refresh };
+}
+
+// ---------------------------------------------------------------------------
+// PendingTab
+// ---------------------------------------------------------------------------
+function PendingTab({ user }) {
+  const { pos, refresh: refreshPos } = useGeolocation();
+  const [requests,    setRequests]   = useState([]);
+  const [loading,     setLoading]    = useState(true);
+  const [error,       setError]      = useState('');
+  const [actionBusy,  setActionBusy] = useState(null);
+  const [actionMsg,   setActionMsg]  = useState('');
+
+  // Does this user already have an active accepted request?
+  const hasActiveAccepted = requests.some(
+    r => r.helper_username === user?.username && r.status === 'ACCEPTED',
+  );
+
+  const load = useCallback(async (latLng) => {
+    setLoading(true);
+    try {
+      const loc = latLng || pos;
+      const data = await getHelpRequests(loc?.lat, loc?.lng);
+      setRequests(data);
+    } catch { setError('Failed to load requests.'); }
+    finally { setLoading(false); }
+  }, [pos]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const id = setInterval(() => load(), 30000); return () => clearInterval(id); }, [load]);
+
+  async function handleAccept(id) {
+    setActionMsg('');
+    setActionBusy(id);
+    try {
+      const loc = await refreshPos();
+      await acceptRequest(id, loc.lat, loc.lng);
+      setActionMsg('✅ Request accepted! Check "My Requests" tab.');
+      load(loc);
+    } catch (err) {
+      if (err.message === 'Geolocation not supported') {
+        setActionMsg('❌ Geolocation is not supported by your browser.');
+      } else if (err.response) {
+        setActionMsg('❌ ' + (err.response.data?.detail || 'Could not accept request.'));
+      } else {
+        setActionMsg('❌ Location access denied. Allow location to accept requests.');
+      }
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  if (loading && requests.length === 0)
+    return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
+  if (error) return <p style={{ color: 'red', padding: '1rem' }}>{error}</p>;
+
+  return (
+    <div>
+      <ErrorMsg msg={actionMsg} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+        <button className="btn" onClick={() => load()} style={{ fontSize: '0.85rem' }}>🔄 Refresh</button>
+      </div>
+      {pos == null && (
+        <div style={{ fontSize: '0.8rem', color: '#92400e', background: '#fef3c7',
+          borderRadius: 8, padding: '0.5rem 0.75rem', marginBottom: '0.75rem' }}>
+          📍 Share location to see distance & enable Accept button.
+        </div>
+      )}
+      {requests.length === 0
+        ? <EmptyState icon="📭" text="No pending requests right now." />
+        : <div style={GRID_STYLE}>
+            {requests.map(req => (
+              <RequestCard key={req.id} req={req} currentUser={user}
+                hasActiveAccepted={hasActiveAccepted}
+                onAccept={handleAccept} actionBusy={actionBusy} />
+            ))}
+          </div>
+      }
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CreateTab
+// ---------------------------------------------------------------------------
+function CreateTab() {
+  const [success, setSuccess] = useState('');
+
+  async function handleSave(data) {
+    await createHelpRequest(data);
+    setSuccess('✅ Your request has been posted!');
+  }
+
+  return (
+    <div>
+      {success && <ErrorMsg msg={success} />}
+      <HelpForm onSave={handleSave} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MyRequestsTab
+// ---------------------------------------------------------------------------
+function MyRequestsTab({ user, updateUser }) {
+  const [requests,   setRequests]   = useState([]);
+  const [loading,    setLoading]    = useState(true);
   const [actionBusy, setActionBusy] = useState(null);
-  const [msg, setMsg] = useState('');
+  const [msg,        setMsg]        = useState('');
+  const [editTarget, setEditTarget] = useState(null);   // req being edited
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -343,7 +523,11 @@ function MyRequestsTab({ user }) {
   async function handleComplete(id) {
     setMsg(''); setActionBusy(id);
     try {
-      await completeRequest(id);
+      const res = await completeRequest(id);
+      // Update points instantly if this user is the helper
+      if (res.helper_username === user?.username && res.helper_points != null) {
+        updateUser({ points: res.helper_points });
+      }
       setMsg('✅ Marked as delivered! Helper earned 1 point.');
       load();
     } catch (err) {
@@ -351,30 +535,71 @@ function MyRequestsTab({ user }) {
     } finally { setActionBusy(null); }
   }
 
-  if (loading) return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
+  async function handleDelete(id) {
+    setMsg(''); setActionBusy(id);
+    try {
+      await deleteRequest(id);
+      setMsg('✅ Request deleted.');
+      load();
+    } catch (err) {
+      setMsg('❌ ' + (err.response?.data?.detail || 'Could not delete.'));
+    } finally { setActionBusy(null); }
+  }
+
+  async function handleEditSave(data) {
+    await editRequest(editTarget.id, data);
+    setEditTarget(null);
+    setMsg('✅ Request updated.');
+    load();
+  }
+
+  if (loading && requests.length === 0)
+    return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
+
+  if (editTarget) {
+    const initial = {
+      item_description:  editTarget.item_description,
+      pickup_location:   editTarget.pickup_location,
+      delivery_location: editTarget.delivery_location,
+      additional_info:   editTarget.additional_info,
+      from_time:         editTarget.from_time.slice(0, 16), // datetime-local format
+      duration:          editTarget.duration,
+    };
+    return (
+      <div>
+        <h4 style={{ marginBottom: '1rem' }}>Edit Request</h4>
+        <HelpForm initial={initial} onSave={handleEditSave}
+          onCancel={() => setEditTarget(null)} isEdit />
+      </div>
+    );
+  }
 
   return (
     <div>
-      {msg && (
-        <div style={{
-          padding: '0.75rem 1rem', borderRadius: 8, marginBottom: '1rem',
-          background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2',
-          color: msg.startsWith('✅') ? '#166534' : '#991b1b', fontSize: '0.9rem',
-        }}>{msg}</div>
-      )}
+      <ErrorMsg msg={msg} />
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
         <button className="btn" onClick={load} style={{ fontSize: '0.85rem' }}>🔄 Refresh</button>
       </div>
       {requests.length === 0
         ? <EmptyState icon="📋" text="No active requests. Create one or accept someone else's!" />
-        : requests.map(req => (
-            <RequestCard key={req.id} req={req} currentUser={user} onComplete={handleComplete} actionBusy={actionBusy} />
-          ))
+        : <div style={GRID_STYLE}>
+            {requests.map(req => (
+              <RequestCard key={req.id} req={req} currentUser={user}
+                hasActiveAccepted={false}
+                onComplete={handleComplete}
+                onEdit={setEditTarget}
+                onDelete={handleDelete}
+                actionBusy={actionBusy} />
+            ))}
+          </div>
       }
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// HistoryTab
+// ---------------------------------------------------------------------------
 function HistoryTab({ user }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -386,15 +611,19 @@ function HistoryTab({ user }) {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
+  if (loading)
+    return <p style={{ color: 'var(--text-secondary)', padding: '1rem' }}>Loading…</p>;
 
   return (
     <div>
       {history.length === 0
-        ? <EmptyState icon="📜" text="No history yet. Complete some requests to see them here." />
-        : history.map(req => (
-            <RequestCard key={req.id} req={req} currentUser={user} />
-          ))
+        ? <EmptyState icon="📜" text="No history yet." />
+        : <div style={GRID_STYLE}>
+            {history.map(req => (
+              <RequestCard key={req.id} req={req} currentUser={user}
+                hasActiveAccepted={false} />
+            ))}
+          </div>
       }
     </div>
   );
@@ -403,9 +632,8 @@ function HistoryTab({ user }) {
 // ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
-
 export default function HelpDelivery() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
 
   return (
     <section className="content-section active">
@@ -428,15 +656,15 @@ export default function HelpDelivery() {
 
       <Tabs
         tabs={[
-          { id: 'pending',  label: '🔍 Pending' },
-          { id: 'create',   label: '➕ Create' },
-          { id: 'mine',     label: '📋 My Requests' },
-          { id: 'history',  label: '📜 History' },
+          { id: 'pending', label: '🔍 Pending' },
+          { id: 'create',  label: '➕ Create' },
+          { id: 'mine',    label: '📋 My Requests' },
+          { id: 'history', label: '📜 History' },
         ]}
         renderContent={(tab) => {
           if (tab === 'pending') return <PendingTab user={user} />;
           if (tab === 'create')  return <CreateTab />;
-          if (tab === 'mine')    return <MyRequestsTab user={user} />;
+          if (tab === 'mine')    return <MyRequestsTab user={user} updateUser={updateUser} />;
           if (tab === 'history') return <HistoryTab user={user} />;
         }}
       />

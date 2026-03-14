@@ -90,14 +90,20 @@ export const resetPassword   = (data) => api.post('/auth/reset-password/', data)
 // ---------------------------------------------------------------------------
 // Help & Delivery API
 // ---------------------------------------------------------------------------
-export const getHelpRequests   = ()         => api.get('/help/').then(r => r.data);
-export const createHelpRequest = (data)     => api.post('/help/', data).then(r => r.data);
+export const getHelpRequests = (lat, lng) => {
+  const qs = lat != null && lng != null ? `?lat=${lat}&lng=${lng}` : '';
+  return api.get(`/help/${qs}`).then(r => r.data);
+};
+export const createHelpRequest = (data)         => api.post('/help/', data).then(r => r.data);
 export const acceptRequest     = (id, lat, lng) =>
   api.post(`/help/${id}/accept/`, { latitude: lat, longitude: lng }).then(r => r.data);
-export const completeRequest   = (id)       => api.post(`/help/${id}/complete/`).then(r => r.data);
-export const getMyRequests     = ()         => api.get('/help/mine/').then(r => r.data);
-export const getHistory        = ()         => api.get('/help/history/').then(r => r.data);
-export const getAdminRequests  = ()         => api.get('/help/admin_list/').then(r => r.data);
+export const completeRequest   = (id)  => api.post(`/help/${id}/complete/`).then(r => r.data);
+export const editRequest       = (id, data) => api.patch(`/help/${id}/`, data).then(r => r.data);
+export const deleteRequest     = (id)  => api.delete(`/help/${id}/`).then(r => r.data);
+export const getMyRequests     = ()    => api.get('/help/mine/').then(r => r.data);
+export const getHistory        = ()    => api.get('/help/history/').then(r => r.data);
+export const getAdminRequests  = ()    => api.get('/help/admin_list/').then(r => r.data);
+export const updateProfile     = (data) => api.patch('/auth/me/', data).then(r => r.data);
 
 // ---------------------------------------------------------------------------
 // Legacy Campus API (unchanged)
