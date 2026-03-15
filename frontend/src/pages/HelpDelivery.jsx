@@ -290,7 +290,7 @@ function HelpForm({ initial = EMPTY_FORM, onSave, onCancel, isEdit = false }) {
         pickup_location:   form.pickup_location,
         delivery_location: form.delivery_location,
         additional_info:   form.additional_info,
-        from_time:         new Date(form.from_time).toISOString(),
+        from_time:         form.from_time,   // already "HH:MM"
         duration:          Number(form.duration),
       });
     } catch (err) {
@@ -342,8 +342,8 @@ function HelpForm({ initial = EMPTY_FORM, onSave, onCancel, isEdit = false }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
         <div className="form-group">
-          <label>Available From *</label>
-          <input name="from_time" type="datetime-local" className="search-input" required
+          <label>Available From (today) *</label>
+          <input name="from_time" type="time" className="search-input" required
             value={form.from_time} onChange={handle} />
         </div>
         <div className="form-group">
@@ -405,18 +405,13 @@ function useGeolocation() {
 // ---------------------------------------------------------------------------
 // PendingTab
 // ---------------------------------------------------------------------------
-function PendingTab({ user }) {
+function PendingTab({ user, hasActiveAccepted, onAccepted }) {
   const { pos, refresh: refreshPos } = useGeolocation();
   const [requests,    setRequests]   = useState([]);
   const [loading,     setLoading]    = useState(true);
   const [error,       setError]      = useState('');
   const [actionBusy,  setActionBusy] = useState(null);
   const [actionMsg,   setActionMsg]  = useState('');
-
-  // Does this user already have an active accepted request?
-  const hasActiveAccepted = requests.some(
-    r => r.helper_username === user?.username && r.status === 'ACCEPTED',
-  );
 
   const load = useCallback(async (latLng) => {
     setLoading(true);
@@ -438,6 +433,7 @@ function PendingTab({ user }) {
       const loc = await refreshPos();
       await acceptRequest(id, loc.lat, loc.lng);
       setActionMsg('✅ Request accepted! Check "My Requests" tab.');
+      if (onAccepted) onAccepted();
       load(loc);
     } catch (err) {
       if (err.message === 'Geolocation not supported') {
@@ -562,7 +558,7 @@ function MyRequestsTab({ user, updateUser }) {
       pickup_location:   editTarget.pickup_location,
       delivery_location: editTarget.delivery_location,
       additional_info:   editTarget.additional_info,
-      from_time:         editTarget.from_time.slice(0, 16), // datetime-local format
+      from_time:         editTarget.from_time.slice(11, 16), // extract HH:MM from ISO
       duration:          editTarget.duration,
     };
     return (
@@ -634,6 +630,8 @@ function HistoryTab({ user }) {
 // ---------------------------------------------------------------------------
 export default function HelpDelivery() {
   const { user, updateUser } = useAuth();
+  // Track whether current user has an active accepted delivery across tabs
+  const [hasActiveAccepted, setHasActiveAccepted] = useState(false);
 
   return (
     <section className="content-section active">
@@ -662,9 +660,16 @@ export default function HelpDelivery() {
           { id: 'history', label: '📜 History' },
         ]}
         renderContent={(tab) => {
-          if (tab === 'pending') return <PendingTab user={user} />;
+          if (tab === 'pending') return (
+            <PendingTab user={user}
+              hasActiveAccepted={hasActiveAccepted}
+              onAccepted={() => setHasActiveAccepted(true)} />
+          );
           if (tab === 'create')  return <CreateTab />;
-          if (tab === 'mine')    return <MyRequestsTab user={user} updateUser={updateUser} />;
+          if (tab === 'mine')    return (
+            <MyRequestsTab user={user} updateUser={updateUser}
+              onActiveAcceptedChange={setHasActiveAccepted} />
+          );
           if (tab === 'history') return <HistoryTab user={user} />;
         }}
       />
