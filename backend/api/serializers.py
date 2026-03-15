@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from .models import (
@@ -81,10 +79,12 @@ _FLAT_DELIVERY_VALUES = [
 class HelpRequestCreateSerializer(serializers.ModelSerializer):
     """
     Creates a help request.
+    - from_time: accepts "HH:MM" only; view combines with today's local date.
     - duration (minutes) replaces to_time; view computes to_time = from_time + duration.
     - contact_number is auto-populated by the view from requester's profile.
     """
-    duration = serializers.ChoiceField(choices=DURATION_VALUES)
+    from_time = serializers.TimeField(input_formats=['%H:%M'])
+    duration  = serializers.ChoiceField(choices=DURATION_VALUES)
 
     class Meta:
         model = HelpRequest
@@ -98,17 +98,11 @@ class HelpRequestCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Invalid delivery location: {value}")
         return value
 
-    def validate(self, attrs):
-        from django.utils import timezone
-        to_time = attrs['from_time'] + timedelta(minutes=attrs['duration'])
-        if to_time <= timezone.now():
-            raise serializers.ValidationError("Computed end time must be in the future.")
-        return attrs
-
 
 class HelpRequestEditSerializer(serializers.ModelSerializer):
     """PATCH serializer — requester can edit any subset of these fields on a PENDING request."""
-    duration = serializers.ChoiceField(choices=DURATION_VALUES, required=False)
+    from_time = serializers.TimeField(input_formats=['%H:%M'], required=False)
+    duration  = serializers.ChoiceField(choices=DURATION_VALUES, required=False)
 
     class Meta:
         model = HelpRequest

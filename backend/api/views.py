@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
-from datetime import timedelta
+import datetime as dt
 
 from .models import (
     User, HelpRequest, PasswordResetToken,
@@ -256,15 +256,27 @@ class HelpRequestViewSet(viewsets.ViewSet):
         serializer = HelpRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        from_time = serializer.validated_data['from_time']
+        # Combine today's local date with the submitted HH:MM time
+        raw_time  = serializer.validated_data['from_time']    # datetime.time
         duration  = serializer.validated_data['duration']
-        to_time   = from_time + timedelta(minutes=duration)
+        today     = timezone.localdate()                       # date in Asia/Kolkata
+        from_time = timezone.make_aware(
+            dt.datetime.combine(today, raw_time)
+        )
+        to_time = from_time + dt.timedelta(minutes=duration)
+
+        if to_time <= timezone.now():
+            return Response(
+                {'detail': 'The window end time must be in the future.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Auto-populate contact from requester's profile
         contact = request.user.phone_number or request.user.phone or ''
 
         help_req = serializer.save(
             requester=request.user,
+            from_time=from_time,
             to_time=to_time,
             contact_number=contact,
         )
@@ -401,14 +413,23 @@ class HelpRequestViewSet(viewsets.ViewSet):
         serializer = HelpRequestEditSerializer(help_req, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
-        from_time = serializer.validated_data.get('from_time', help_req.from_time)
-        duration  = serializer.validated_data.get('duration',  help_req.duration)
-        to_time   = from_time + timedelta(minutes=duration)
+        raw_time = serializer.validated_data.get('from_time')  # datetime.time or None
+        duration = serializer.validated_data.get('duration', help_req.duration)
+
+        if raw_time is not None:
+            today     = timezone.localdate()
+            from_time = timezone.make_aware(
+                dt.datetime.combine(today, raw_time)
+            )
+        else:
+            from_time = help_req.from_time
+
+        to_time = from_time + dt.timedelta(minutes=duration)
 
         if to_time <= timezone.now():
             return Response({'detail': 'Computed end time must be in the future.'}, status=400)
 
-        updated = serializer.save(to_time=to_time)
+        updated = serializer.save(from_time=from_time, to_time=to_time)
         return Response(HelpRequestSerializer(updated, context={'request': request}).data)
 
     # DELETE /api/help/{id}/
