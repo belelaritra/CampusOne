@@ -190,6 +190,135 @@ class Order(models.Model):
         return f"Order #{self.id} by {self.roll_number}"
 
 
+# ---------------------------------------------------------------------------
+# Food Ordering Module
+# ---------------------------------------------------------------------------
+
+FOOD_DELIVERY_LOCATION_CHOICES = [
+    ('hostel_1',  'Hostel 1'),  ('hostel_2',  'Hostel 2'),  ('hostel_3',  'Hostel 3'),
+    ('hostel_4',  'Hostel 4'),  ('hostel_5',  'Hostel 5'),  ('hostel_6',  'Hostel 6'),
+    ('hostel_7',  'Hostel 7'),  ('hostel_8',  'Hostel 8'),  ('hostel_9',  'Hostel 9'),
+    ('hostel_10', 'Hostel 10'), ('hostel_11', 'Hostel 11'), ('hostel_12', 'Hostel 12'),
+    ('hostel_13', 'Hostel 13'), ('hostel_14', 'Hostel 14'), ('hostel_15', 'Hostel 15'),
+    ('hostel_16', 'Hostel 16'), ('hostel_17', 'Hostel 17'), ('hostel_18', 'Hostel 18'),
+    ('hostel_19', 'Hostel 19'), ('hostel_21', 'Hostel 21'),
+    ('tansa_house', 'Tansa House'),
+    ('kresit',        'KReSIT'),             ('sjmsom',       'SJMSOM'),
+    ('lecture_hall',  'Lecture Hall Complex'),('conv_hall',    'Convocation Hall'),
+    ('main_building', 'Main Building'),      ('central_lib',  'Central Library'),
+    ('sac',           'Students Activity Centre'), ('gymkhana', 'Students Gymkhana'),
+]
+
+FOOD_ORDER_STATUS_CHOICES = [
+    ('PENDING',          'Pending'),
+    ('ACCEPTED',         'Accepted'),
+    ('PREPARING',        'Preparing'),
+    ('OUT_FOR_DELIVERY', 'Out for Delivery'),
+    ('DELIVERED',        'Delivered'),
+    ('CANCELLED',        'Cancelled'),
+]
+
+
+class Outlet(models.Model):
+    """Campus food outlet (Aromas Dhaba, H2 Canteen, …)."""
+    name        = models.CharField(max_length=100, unique=True)
+    image       = models.CharField(max_length=500, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    is_active   = models.BooleanField(default=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class MenuItem(models.Model):
+    """Food item belonging to an Outlet."""
+    outlet      = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='menu_items')
+    name        = models.CharField(max_length=100)
+    image       = models.CharField(max_length=500, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    price       = models.DecimalField(max_digits=8, decimal_places=2)
+    is_veg      = models.BooleanField(default=True)
+    is_available= models.BooleanField(default=True)
+    avg_rating  = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    review_count= models.PositiveIntegerField(default=0)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.outlet.name})"
+
+    def update_rating(self):
+        """Atomically recalculate avg_rating from all reviews. Call inside a transaction."""
+        from django.db.models import Avg
+        result = self.reviews.aggregate(avg=Avg('rating'))
+        self.avg_rating   = round(result['avg'] or 0, 2)
+        self.review_count = self.reviews.count()
+        self.save(update_fields=['avg_rating', 'review_count'])
+
+
+class OutletAdmin(models.Model):
+    """Links a User account to exactly one Outlet as its administrator."""
+    user   = models.OneToOneField(User, on_delete=models.CASCADE, related_name='outlet_admin_profile')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='outlet_admins')
+
+    def __str__(self):
+        return f"{self.user.username} → {self.outlet.name}"
+
+
+class FoodOrder(models.Model):
+    user              = models.ForeignKey(User, on_delete=models.CASCADE, related_name='food_orders')
+    outlet            = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='food_orders')
+    status            = models.CharField(
+        max_length=20, choices=FOOD_ORDER_STATUS_CHOICES, default='PENDING', db_index=True
+    )
+    total_price       = models.DecimalField(max_digits=10, decimal_places=2)
+    delivery_location = models.CharField(max_length=50, choices=FOOD_DELIVERY_LOCATION_CHOICES)
+    payment_method    = models.CharField(max_length=20, default='COD')
+    reviewed          = models.BooleanField(default=False)
+    created_at        = models.DateTimeField(auto_now_add=True)
+    updated_at        = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Order #{self.id} by {self.user.username} from {self.outlet.name} [{self.status}]"
+
+
+class FoodOrderItem(models.Model):
+    order     = models.ForeignKey(FoodOrder, on_delete=models.CASCADE, related_name='order_items')
+    food_item = models.ForeignKey(MenuItem, on_delete=models.PROTECT, related_name='order_items')
+    quantity  = models.PositiveSmallIntegerField()
+    price     = models.DecimalField(max_digits=8, decimal_places=2)   # snapshot at order time
+
+    def __str__(self):
+        return f"{self.quantity}× {self.food_item.name}"
+
+
+class Review(models.Model):
+    user      = models.ForeignKey(User, on_delete=models.CASCADE, related_name='food_reviews')
+    food_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, related_name='reviews')
+    order     = models.ForeignKey(FoodOrder, on_delete=models.CASCADE, related_name='item_reviews')
+    rating    = models.PositiveSmallIntegerField()   # 1–5
+    created_at= models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('user', 'order', 'food_item')]
+
+    def __str__(self):
+        return f"{self.user.username} rated {self.food_item.name} {self.rating}★"
+
+
+# ---------------------------------------------------------------------------
+# Legacy campus models (unchanged)
+# ---------------------------------------------------------------------------
+
 class LostFoundItem(models.Model):
     TYPE_CHOICES = [('lost', 'Lost'), ('found', 'Found')]
 

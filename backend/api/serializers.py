@@ -5,6 +5,9 @@ from .models import (
     Hostel, FoodOutlet, FoodItem, Order,
     LostFoundItem, MarketplaceListing, Doctor, CampusEvent,
     PICKUP_CHOICES, DELIVERY_CHOICES,
+    # Food Ordering
+    Outlet, MenuItem, OutletAdmin, FoodOrder, FoodOrderItem, Review,
+    FOOD_DELIVERY_LOCATION_CHOICES,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -40,10 +43,33 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    is_outlet_admin = serializers.SerializerMethodField()
+    outlet_id       = serializers.SerializerMethodField()
+    outlet_name     = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'full_name', 'phone_number', 'roll_number', 'points']
+        fields = [
+            'id', 'username', 'email', 'phone', 'full_name',
+            'phone_number', 'roll_number', 'points',
+            'is_outlet_admin', 'outlet_id', 'outlet_name',
+        ]
         read_only_fields = fields
+
+    def get_is_outlet_admin(self, obj):
+        return OutletAdmin.objects.filter(user=obj).exists()
+
+    def get_outlet_id(self, obj):
+        try:
+            return obj.outlet_admin_profile.outlet_id
+        except OutletAdmin.DoesNotExist:
+            return None
+
+    def get_outlet_name(self, obj):
+        try:
+            return obj.outlet_admin_profile.outlet.name
+        except OutletAdmin.DoesNotExist:
+            return None
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
@@ -221,3 +247,90 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = CampusEvent
         fields = '__all__'
+
+
+# ---------------------------------------------------------------------------
+# Food Ordering Serializers
+# ---------------------------------------------------------------------------
+
+class OutletSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Outlet
+        fields = ['id', 'name', 'image', 'description', 'is_active']
+
+
+class MenuItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = MenuItem
+        fields = [
+            'id', 'outlet', 'name', 'image', 'description',
+            'price', 'is_veg', 'is_available', 'avg_rating', 'review_count',
+        ]
+        read_only_fields = ['avg_rating', 'review_count']
+
+
+class MenuItemWriteSerializer(serializers.ModelSerializer):
+    """Used by outlet admin to create / update menu items."""
+    class Meta:
+        model  = MenuItem
+        fields = ['id', 'name', 'image', 'description', 'price', 'is_veg', 'is_available']
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Price must be positive.")
+        return value
+
+
+class FoodOrderItemSerializer(serializers.ModelSerializer):
+    food_item_name  = serializers.CharField(source='food_item.name',   read_only=True)
+    food_item_image = serializers.CharField(source='food_item.image',  read_only=True)
+    food_item_is_veg= serializers.BooleanField(source='food_item.is_veg', read_only=True)
+
+    class Meta:
+        model  = FoodOrderItem
+        fields = ['id', 'food_item', 'food_item_name', 'food_item_image', 'food_item_is_veg', 'quantity', 'price']
+
+
+class FoodOrderSerializer(serializers.ModelSerializer):
+    order_items               = FoodOrderItemSerializer(many=True, read_only=True)
+    outlet_name               = serializers.CharField(source='outlet.name',     read_only=True)
+    user_username             = serializers.CharField(source='user.username',   read_only=True)
+    delivery_location_display = serializers.CharField(
+        source='get_delivery_location_display', read_only=True
+    )
+
+    class Meta:
+        model  = FoodOrder
+        fields = [
+            'id', 'user', 'user_username', 'outlet', 'outlet_name',
+            'status', 'total_price', 'delivery_location', 'delivery_location_display',
+            'payment_method', 'reviewed', 'created_at', 'updated_at', 'order_items',
+        ]
+        read_only_fields = ['id', 'user', 'status', 'reviewed', 'created_at', 'updated_at']
+
+
+# --------------- validated input for placing an order ----------------------
+
+_FLAT_FOOD_DELIVERY_VALUES = [v for v, _ in FOOD_DELIVERY_LOCATION_CHOICES]
+
+
+class OrderItemInputSerializer(serializers.Serializer):
+    food_item_id = serializers.IntegerField(min_value=1)
+    quantity     = serializers.IntegerField(min_value=1, max_value=5)
+
+
+class PlaceOrderSerializer(serializers.Serializer):
+    outlet_id         = serializers.IntegerField(min_value=1)
+    delivery_location = serializers.ChoiceField(choices=_FLAT_FOOD_DELIVERY_VALUES)
+    items             = OrderItemInputSerializer(many=True, min_length=1)
+
+
+# --------------- review submission ----------------------------------------
+
+class RatingInputSerializer(serializers.Serializer):
+    food_item_id = serializers.IntegerField(min_value=1)
+    rating       = serializers.IntegerField(min_value=1, max_value=5)
+
+
+class ReviewSubmitSerializer(serializers.Serializer):
+    ratings = RatingInputSerializer(many=True, min_length=1)
