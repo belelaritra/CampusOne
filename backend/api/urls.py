@@ -62,6 +62,7 @@ urlpatterns = [
     path('food/analytics/hostel-wise/',    views.HostelWiseAnalyticsView.as_view(),   name='food-analytics-hostel'),
     path('food/analytics/top-food-items/', views.TopFoodItemsAnalyticsView.as_view(), name='food-analytics-top'),
     path('food/analytics/time-wise/',      views.TimeWiseAnalyticsView.as_view(),     name='food-analytics-time'),
+    path('food/analytics/daily-sales/',    views.DailySalesAnalyticsView.as_view(),   name='food-analytics-daily'),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),

@@ -132,18 +132,38 @@ export const cancelFoodOrder    = (id)         => api.post(`/food/orders/${id}/c
 export const submitFoodReview   = (id, data)   => api.post(`/food/orders/${id}/review/`, data).then(r => r.data);
 
 // Food Ordering — Outlet Admin APIs
-export const getAdminFoodOrders = ()           => api.get('/food/admin/orders/').then(r => r.data);
-export const acceptFoodOrder    = (id)         => api.post(`/food/admin/orders/${id}/accept/`).then(r => r.data);
-export const cancelFoodOrderAdmin = (id)       => api.post(`/food/admin/orders/${id}/cancel/`).then(r => r.data);
-export const updateFoodOrderStatus = (id, st)  => api.patch(`/food/admin/orders/${id}/status/`, { status: st }).then(r => r.data);
-export const getAdminMenu       = ()           => api.get('/food/admin/menu/').then(r => r.data);
-export const addMenuItem        = (data)       => api.post('/food/admin/menu/', data).then(r => r.data);
-export const updateMenuItem     = (id, data)   => api.patch(`/food/admin/menu/${id}/`, data).then(r => r.data);
-export const deleteMenuItem     = (id)         => api.delete(`/food/admin/menu/${id}/`).then(r => r.data);
+export const getAdminFoodOrders   = ()          => api.get('/food/admin/orders/').then(r => r.data);
+export const acceptFoodOrder      = (id)        => api.post(`/food/admin/orders/${id}/accept/`).then(r => r.data);
+export const cancelFoodOrderAdmin = (id)        => api.post(`/food/admin/orders/${id}/cancel/`).then(r => r.data);
+export const updateFoodOrderStatus = (id, st)   => api.patch(`/food/admin/orders/${id}/status/`, { status: st }).then(r => r.data);
+export const getAdminMenu         = ()          => api.get('/food/admin/menu/').then(r => r.data);
+
+// addMenuItem / updateMenuItem: use FormData when an image_upload File is present
+function _menuItemPayload(data) {
+  if (data.image_upload instanceof File) {
+    const fd = new FormData();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') fd.append(k, v);
+    });
+    return { payload: fd, headers: { 'Content-Type': 'multipart/form-data' } };
+  }
+  return { payload: data, headers: {} };
+}
+
+export const addMenuItem = (data) => {
+  const { payload, headers } = _menuItemPayload(data);
+  return api.post('/food/admin/menu/', payload, { headers }).then(r => r.data);
+};
+export const updateMenuItem = (id, data) => {
+  const { payload, headers } = _menuItemPayload(data);
+  return api.patch(`/food/admin/menu/${id}/`, payload, { headers }).then(r => r.data);
+};
+export const deleteMenuItem = (id) => api.delete(`/food/admin/menu/${id}/`).then(r => r.data);
 
 // Food Ordering — Analytics APIs
 export const getHostelAnalytics   = () => api.get('/food/analytics/hostel-wise/').then(r => r.data);
 export const getTopFoodItems      = () => api.get('/food/analytics/top-food-items/').then(r => r.data);
 export const getTimeWiseAnalytics = () => api.get('/food/analytics/time-wise/').then(r => r.data);
+export const getDailySalesAnalytics = () => api.get('/food/analytics/daily-sales/').then(r => r.data);
 
 export default api;

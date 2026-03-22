@@ -213,10 +213,20 @@ FOOD_ORDER_STATUS_CHOICES = [
     ('PENDING',          'Pending'),
     ('ACCEPTED',         'Accepted'),
     ('PREPARING',        'Preparing'),
-    ('OUT_FOR_DELIVERY', 'Out for Delivery'),
-    ('DELIVERED',        'Delivered'),
+    ('OUT_FOR_DELIVERY', 'Out for Delivery'),   # delivery only
+    ('READY',            'Ready for Pickup'),    # takeaway only
+    ('DELIVERED',        'Delivered'),            # delivery only
+    ('TOOK',             'Picked Up'),            # takeaway only
     ('CANCELLED',        'Cancelled'),
 ]
+
+FOOD_ORDER_TYPE_CHOICES = [
+    ('DELIVERY', 'Delivery'),
+    ('TAKEAWAY', 'Takeaway'),
+]
+
+# Statuses that count as "completed / in-progress sales" for analytics
+FOOD_ACTIVE_STATUSES = ['ACCEPTED', 'PREPARING', 'OUT_FOR_DELIVERY', 'READY', 'DELIVERED', 'TOOK']
 
 
 class Outlet(models.Model):
@@ -236,22 +246,31 @@ class Outlet(models.Model):
 
 class MenuItem(models.Model):
     """Food item belonging to an Outlet."""
-    outlet      = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='menu_items')
-    name        = models.CharField(max_length=100)
-    image       = models.CharField(max_length=500, blank=True, default='')
-    description = models.TextField(blank=True, default='')
-    price       = models.DecimalField(max_digits=8, decimal_places=2)
-    is_veg      = models.BooleanField(default=True)
-    is_available= models.BooleanField(default=True)
-    avg_rating  = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
-    review_count= models.PositiveIntegerField(default=0)
-    created_at  = models.DateTimeField(auto_now_add=True)
+    outlet       = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='menu_items')
+    name         = models.CharField(max_length=100)
+    # Image: local upload takes priority; URL is a fallback (and the legacy 'image' field)
+    image_upload = models.ImageField(upload_to='menu_items/', blank=True, null=True)
+    image_url    = models.CharField(max_length=500, blank=True, default='')
+    description  = models.TextField(blank=True, default='')
+    price        = models.DecimalField(max_digits=8, decimal_places=2)
+    is_veg       = models.BooleanField(default=True)
+    is_available = models.BooleanField(default=True)
+    avg_rating   = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    review_count = models.PositiveIntegerField(default=0)
+    created_at   = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['name']
 
     def __str__(self):
         return f"{self.name} ({self.outlet.name})"
+
+    @property
+    def image_effective(self):
+        """Returns the best available image path/URL (upload > url > '')."""
+        if self.image_upload:
+            return self.image_upload.url
+        return self.image_url or ''
 
     def update_rating(self):
         """Atomically recalculate avg_rating from all reviews. Call inside a transaction."""
@@ -277,10 +296,20 @@ class FoodOrder(models.Model):
     status            = models.CharField(
         max_length=20, choices=FOOD_ORDER_STATUS_CHOICES, default='PENDING', db_index=True
     )
+    order_type        = models.CharField(
+        max_length=10, choices=FOOD_ORDER_TYPE_CHOICES, default='DELIVERY', db_index=True
+    )
     total_price       = models.DecimalField(max_digits=10, decimal_places=2)
-    delivery_location = models.CharField(max_length=50, choices=FOOD_DELIVERY_LOCATION_CHOICES)
+    # delivery_location is empty for TAKEAWAY orders
+    delivery_location = models.CharField(
+        max_length=50, choices=FOOD_DELIVERY_LOCATION_CHOICES, blank=True, default=''
+    )
     payment_method    = models.CharField(max_length=20, default='COD')
     reviewed          = models.BooleanField(default=False)
+    # User snapshot — immutable after creation
+    user_full_name    = models.CharField(max_length=150, blank=True, default='')
+    user_phone_number = models.CharField(max_length=15,  blank=True, default='')
+    user_email        = models.EmailField(blank=True, default='')
     created_at        = models.DateTimeField(auto_now_add=True)
     updated_at        = models.DateTimeField(auto_now=True)
 
