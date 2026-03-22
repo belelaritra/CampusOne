@@ -20,7 +20,7 @@ from .models import (
     PICKUP_CHOICES,
     # Food Ordering
     Outlet, MenuItem, OutletAdmin, FoodOrder, FoodOrderItem, Review,
-    FOOD_DELIVERY_LOCATION_CHOICES,
+    FOOD_DELIVERY_LOCATION_CHOICES, FOOD_ACTIVE_STATUSES,
 )
 from .serializers import (
     RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
@@ -663,7 +663,8 @@ class PlaceOrderView(APIView):
         serializer.is_valid(raise_exception=True)
 
         outlet_id         = serializer.validated_data['outlet_id']
-        delivery_location = serializer.validated_data['delivery_location']
+        order_type        = serializer.validated_data.get('order_type', 'DELIVERY')
+        delivery_location = serializer.validated_data.get('delivery_location', '')
         items_data        = serializer.validated_data['items']
 
         with transaction.atomic():
@@ -698,12 +699,18 @@ class PlaceOrderView(APIView):
                 for i in items_data
             )
 
+            # Auto-populate user snapshot (immutable after creation)
+            u = request.user
             order = FoodOrder.objects.create(
                 user=request.user,
                 outlet=outlet,
-                delivery_location=delivery_location,
+                order_type=order_type,
+                delivery_location=delivery_location if order_type == 'DELIVERY' else '',
                 total_price=total,
                 payment_method='COD',
+                user_full_name=u.full_name or u.get_full_name() or u.username,
+                user_phone_number=u.phone_number or u.phone or '',
+                user_email=u.email or '',
             )
 
             FoodOrderItem.objects.bulk_create([
@@ -718,7 +725,8 @@ class PlaceOrderView(APIView):
 
         return Response(
             FoodOrderSerializer(
-                FoodOrder.objects.prefetch_related('order_items__food_item').get(pk=order.pk)
+                FoodOrder.objects.prefetch_related('order_items__food_item').get(pk=order.pk),
+                context={'request': request},
             ).data,
             status=status.HTTP_201_CREATED,
         )
@@ -727,7 +735,8 @@ class PlaceOrderView(APIView):
 class UserPendingOrdersView(generics.ListAPIView):
     """
     GET /api/food/orders/pending/
-    Returns: active orders + DELIVERED-but-not-yet-reviewed orders.
+    Returns: active orders + terminal-but-not-yet-reviewed orders.
+    Terminal statuses: DELIVERED (delivery) or TOOK (takeaway).
     """
     serializer_class   = FoodOrderSerializer
     permission_classes = [IsAuthenticated]
@@ -737,7 +746,7 @@ class UserPendingOrdersView(generics.ListAPIView):
             FoodOrder.objects
             .filter(user=self.request.user)
             .exclude(status='CANCELLED')
-            .exclude(status='DELIVERED', reviewed=True)
+            .exclude(status__in=['DELIVERED', 'TOOK'], reviewed=True)
             .select_related('outlet')
             .prefetch_related('order_items__food_item')
         )
@@ -746,7 +755,7 @@ class UserPendingOrdersView(generics.ListAPIView):
 class UserOrderHistoryView(generics.ListAPIView):
     """
     GET /api/food/orders/history/
-    Returns: DELIVERED+reviewed  OR  CANCELLED.
+    Returns: (DELIVERED|TOOK)+reviewed  OR  CANCELLED.
     """
     serializer_class   = FoodOrderSerializer
     permission_classes = [IsAuthenticated]
@@ -755,7 +764,7 @@ class UserOrderHistoryView(generics.ListAPIView):
         return (
             FoodOrder.objects
             .filter(
-                Q(user=self.request.user, status='DELIVERED', reviewed=True) |
+                Q(user=self.request.user, status__in=['DELIVERED', 'TOOK'], reviewed=True) |
                 Q(user=self.request.user, status='CANCELLED')
             )
             .select_related('outlet')
@@ -798,14 +807,14 @@ class CancelOrderView(APIView):
             order.status = 'CANCELLED'
             order.save(update_fields=['status', 'updated_at'])
 
-        return Response(FoodOrderSerializer(order).data)
+        return Response(FoodOrderSerializer(order, context={'request': request}).data)
 
 
 class SubmitReviewView(APIView):
     """
     POST /api/food/orders/{pk}/review/
     Body: { "ratings": [{"food_item_id": X, "rating": N}, …] }
-    Requires: order is DELIVERED, belongs to user, not yet reviewed.
+    Requires: order is DELIVERED (delivery) or TOOK (takeaway), not yet reviewed.
     """
     permission_classes = [IsAuthenticated]
 
@@ -821,8 +830,11 @@ class SubmitReviewView(APIView):
             except FoodOrder.DoesNotExist:
                 return Response({'detail': 'Order not found.'}, status=404)
 
-            if order.status != 'DELIVERED':
-                return Response({'detail': 'You can only review a delivered order.'}, status=400)
+            if order.status not in ('DELIVERED', 'TOOK'):
+                return Response(
+                    {'detail': 'You can only review a delivered or picked-up order.'},
+                    status=400,
+                )
             if order.reviewed:
                 return Response({'detail': 'This order has already been reviewed.'}, status=400)
 
@@ -944,22 +956,33 @@ class AdminOrderActionView(APIView):
 
             order.save(update_fields=['status', 'updated_at'])
 
-        return Response(FoodOrderSerializer(order).data)
+        return Response(FoodOrderSerializer(order, context={'request': request}).data)
 
     def patch(self, request, pk, action_name=None):
-        """PATCH /api/food/admin/orders/{pk}/status/ — advance order status."""
-        valid_transitions = {
-            'ACCEPTED':         ['PREPARING'],
-            'PREPARING':        ['OUT_FOR_DELIVERY'],
-            'OUT_FOR_DELIVERY': ['DELIVERED'],
-        }
-
+        """PATCH /api/food/admin/orders/{pk}/status/ — advance order status.
+        Transitions depend on order_type:
+          DELIVERY: ACCEPTED → PREPARING → OUT_FOR_DELIVERY → DELIVERED
+          TAKEAWAY: ACCEPTED → PREPARING → READY → TOOK
+        """
         new_status = request.data.get('status', '').upper()
 
         with transaction.atomic():
             order = self._get_order(request, pk)
             if not order:
                 return Response({'detail': 'Order not found.'}, status=404)
+
+            if order.order_type == 'TAKEAWAY':
+                valid_transitions = {
+                    'ACCEPTED': ['PREPARING'],
+                    'PREPARING': ['READY'],
+                    'READY':    ['TOOK'],
+                }
+            else:
+                valid_transitions = {
+                    'ACCEPTED':         ['PREPARING'],
+                    'PREPARING':        ['OUT_FOR_DELIVERY'],
+                    'OUT_FOR_DELIVERY': ['DELIVERED'],
+                }
 
             allowed = valid_transitions.get(order.status, [])
             if new_status not in allowed:
@@ -971,7 +994,7 @@ class AdminOrderActionView(APIView):
             order.status = new_status
             order.save(update_fields=['status', 'updated_at'])
 
-        return Response(FoodOrderSerializer(order).data)
+        return Response(FoodOrderSerializer(order, context={'request': request}).data)
 
 
 # ---------------------------------------------------------------------------
@@ -984,20 +1007,27 @@ class AnalyticsBaseView(APIView):
     def get_outlet(self, request):
         return request.user.outlet_admin_profile.outlet
 
+    def active_orders(self, outlet):
+        """Base queryset: only ACCEPTED+ orders (exclude PENDING & CANCELLED)."""
+        return FoodOrder.objects.filter(
+            outlet=outlet,
+            status__in=FOOD_ACTIVE_STATUSES,
+        )
+
 
 class HostelWiseAnalyticsView(AnalyticsBaseView):
-    """GET /api/food/analytics/hostel-wise/"""
+    """GET /api/food/analytics/hostel-wise/ — delivery orders only (location is empty for takeaway)."""
 
     def get(self, request):
         outlet = self.get_outlet(request)
         data = (
-            FoodOrder.objects
-            .filter(outlet=outlet)
+            self.active_orders(outlet)
+            .filter(order_type='DELIVERY')
+            .exclude(delivery_location='')
             .values('delivery_location')
             .annotate(order_count=Count('id'))
             .order_by('-order_count')
         )
-        # Attach display names
         loc_display = dict(FOOD_DELIVERY_LOCATION_CHOICES)
         result = [
             {
@@ -1017,20 +1047,20 @@ class TopFoodItemsAnalyticsView(AnalyticsBaseView):
         outlet = self.get_outlet(request)
         data = (
             FoodOrderItem.objects
-            .filter(order__outlet=outlet)
+            .filter(order__outlet=outlet, order__status__in=FOOD_ACTIVE_STATUSES)
             .values('food_item__id', 'food_item__name')
             .annotate(
                 total_quantity=Sum('quantity'),
                 order_count=Count('order', distinct=True),
             )
-            .order_by('-total_quantity')[:10]
+            .order_by('-total_quantity')
         )
         result = [
             {
-                'food_item_id':    row['food_item__id'],
-                'food_item_name':  row['food_item__name'],
-                'total_quantity':  row['total_quantity'],
-                'order_count':     row['order_count'],
+                'food_item_id':   row['food_item__id'],
+                'food_item_name': row['food_item__name'],
+                'total_quantity': row['total_quantity'],
+                'order_count':    row['order_count'],
             }
             for row in data
         ]
@@ -1038,16 +1068,44 @@ class TopFoodItemsAnalyticsView(AnalyticsBaseView):
 
 
 class TimeWiseAnalyticsView(AnalyticsBaseView):
-    """GET /api/food/analytics/time-wise/"""
+    """GET /api/food/analytics/time-wise/ — 24-hour distribution."""
 
     def get(self, request):
         outlet = self.get_outlet(request)
         data = (
-            FoodOrder.objects
-            .filter(outlet=outlet)
+            self.active_orders(outlet)
             .annotate(hour=ExtractHour('created_at'))
             .values('hour')
             .annotate(order_count=Count('id'))
             .order_by('hour')
         )
         return Response(list(data))
+
+
+class DailySalesAnalyticsView(AnalyticsBaseView):
+    """GET /api/food/analytics/daily-sales/ — orders + revenue per day (last 30 days)."""
+
+    def get(self, request):
+        from django.db.models.functions import TruncDate
+        outlet    = self.get_outlet(request)
+        cutoff    = timezone.now() - dt.timedelta(days=30)
+        data = (
+            self.active_orders(outlet)
+            .filter(created_at__gte=cutoff)
+            .annotate(day=TruncDate('created_at'))
+            .values('day')
+            .annotate(
+                order_count=Count('id'),
+                revenue=Sum('total_price'),
+            )
+            .order_by('day')
+        )
+        result = [
+            {
+                'day':         str(row['day']),
+                'order_count': row['order_count'],
+                'revenue':     float(row['revenue'] or 0),
+            }
+            for row in data
+        ]
+        return Response(result)

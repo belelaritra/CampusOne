@@ -7,7 +7,7 @@ from .models import (
     PICKUP_CHOICES, DELIVERY_CHOICES,
     # Food Ordering
     Outlet, MenuItem, OutletAdmin, FoodOrder, FoodOrderItem, Review,
-    FOOD_DELIVERY_LOCATION_CHOICES,
+    FOOD_DELIVERY_LOCATION_CHOICES, FOOD_ORDER_TYPE_CHOICES,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -260,20 +260,36 @@ class OutletSerializer(serializers.ModelSerializer):
 
 
 class MenuItemSerializer(serializers.ModelSerializer):
+    """Read serializer — exposes image_effective (upload > url)."""
+    image_effective = serializers.SerializerMethodField()
+
     class Meta:
         model  = MenuItem
         fields = [
-            'id', 'outlet', 'name', 'image', 'description',
-            'price', 'is_veg', 'is_available', 'avg_rating', 'review_count',
+            'id', 'outlet', 'name',
+            'image_upload', 'image_url', 'image_effective',
+            'description', 'price', 'is_veg', 'is_available',
+            'avg_rating', 'review_count',
         ]
-        read_only_fields = ['avg_rating', 'review_count']
+        read_only_fields = ['avg_rating', 'review_count', 'image_effective']
+
+    def get_image_effective(self, obj):
+        request = self.context.get('request')
+        if obj.image_upload:
+            url = obj.image_upload.url
+            return request.build_absolute_uri(url) if request else url
+        return obj.image_url or ''
 
 
 class MenuItemWriteSerializer(serializers.ModelSerializer):
-    """Used by outlet admin to create / update menu items."""
+    """Used by outlet admin to create / update menu items.
+    Accepts multipart (with image_upload file) or JSON (image_url only)."""
+    image_upload = serializers.ImageField(required=False, allow_null=True)
+    image_url    = serializers.CharField(required=False, allow_blank=True, default='')
+
     class Meta:
         model  = MenuItem
-        fields = ['id', 'name', 'image', 'description', 'price', 'is_veg', 'is_available']
+        fields = ['id', 'name', 'image_upload', 'image_url', 'description', 'price', 'is_veg', 'is_available']
 
     def validate_price(self, value):
         if value <= 0:
@@ -282,36 +298,57 @@ class MenuItemWriteSerializer(serializers.ModelSerializer):
 
 
 class FoodOrderItemSerializer(serializers.ModelSerializer):
-    food_item_name  = serializers.CharField(source='food_item.name',   read_only=True)
-    food_item_image = serializers.CharField(source='food_item.image',  read_only=True)
-    food_item_is_veg= serializers.BooleanField(source='food_item.is_veg', read_only=True)
+    food_item_name   = serializers.CharField(source='food_item.name',    read_only=True)
+    food_item_is_veg = serializers.BooleanField(source='food_item.is_veg', read_only=True)
+    food_item_image  = serializers.SerializerMethodField()
 
     class Meta:
         model  = FoodOrderItem
-        fields = ['id', 'food_item', 'food_item_name', 'food_item_image', 'food_item_is_veg', 'quantity', 'price']
+        fields = [
+            'id', 'food_item', 'food_item_name',
+            'food_item_image', 'food_item_is_veg', 'quantity', 'price',
+        ]
+
+    def get_food_item_image(self, obj):
+        request = self.context.get('request')
+        if obj.food_item.image_upload:
+            url = obj.food_item.image_upload.url
+            return request.build_absolute_uri(url) if request else url
+        return obj.food_item.image_url or ''
 
 
 class FoodOrderSerializer(serializers.ModelSerializer):
     order_items               = FoodOrderItemSerializer(many=True, read_only=True)
-    outlet_name               = serializers.CharField(source='outlet.name',     read_only=True)
-    user_username             = serializers.CharField(source='user.username',   read_only=True)
-    delivery_location_display = serializers.CharField(
-        source='get_delivery_location_display', read_only=True
-    )
+    outlet_name               = serializers.CharField(source='outlet.name',   read_only=True)
+    user_username             = serializers.CharField(source='user.username', read_only=True)
+    order_type_display        = serializers.CharField(source='get_order_type_display', read_only=True)
+    delivery_location_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = FoodOrder
         fields = [
-            'id', 'user', 'user_username', 'outlet', 'outlet_name',
-            'status', 'total_price', 'delivery_location', 'delivery_location_display',
+            'id', 'user', 'user_username',
+            'user_full_name', 'user_phone_number', 'user_email',
+            'outlet', 'outlet_name',
+            'status', 'order_type', 'order_type_display',
+            'total_price', 'delivery_location', 'delivery_location_display',
             'payment_method', 'reviewed', 'created_at', 'updated_at', 'order_items',
         ]
-        read_only_fields = ['id', 'user', 'status', 'reviewed', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'user', 'status', 'reviewed', 'created_at', 'updated_at',
+            'user_full_name', 'user_phone_number', 'user_email',
+        ]
+
+    def get_delivery_location_display(self, obj):
+        if not obj.delivery_location:
+            return 'Takeaway — No Delivery'
+        return obj.get_delivery_location_display()
 
 
 # --------------- validated input for placing an order ----------------------
 
 _FLAT_FOOD_DELIVERY_VALUES = [v for v, _ in FOOD_DELIVERY_LOCATION_CHOICES]
+_ORDER_TYPE_VALUES         = [v for v, _ in FOOD_ORDER_TYPE_CHOICES]
 
 
 class OrderItemInputSerializer(serializers.Serializer):
@@ -321,8 +358,18 @@ class OrderItemInputSerializer(serializers.Serializer):
 
 class PlaceOrderSerializer(serializers.Serializer):
     outlet_id         = serializers.IntegerField(min_value=1)
-    delivery_location = serializers.ChoiceField(choices=_FLAT_FOOD_DELIVERY_VALUES)
+    order_type        = serializers.ChoiceField(choices=_ORDER_TYPE_VALUES, default='DELIVERY')
+    delivery_location = serializers.ChoiceField(
+        choices=_FLAT_FOOD_DELIVERY_VALUES, required=False, allow_blank=True, default=''
+    )
     items             = OrderItemInputSerializer(many=True, min_length=1)
+
+    def validate(self, data):
+        if data.get('order_type', 'DELIVERY') == 'DELIVERY' and not data.get('delivery_location'):
+            raise serializers.ValidationError(
+                {'delivery_location': 'Delivery location is required for DELIVERY orders.'}
+            )
+        return data
 
 
 # --------------- review submission ----------------------------------------
