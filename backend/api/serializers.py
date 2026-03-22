@@ -301,12 +301,13 @@ class FoodOrderItemSerializer(serializers.ModelSerializer):
     food_item_name   = serializers.CharField(source='food_item.name',    read_only=True)
     food_item_is_veg = serializers.BooleanField(source='food_item.is_veg', read_only=True)
     food_item_image  = serializers.SerializerMethodField()
+    user_rating      = serializers.SerializerMethodField()
 
     class Meta:
         model  = FoodOrderItem
         fields = [
             'id', 'food_item', 'food_item_name',
-            'food_item_image', 'food_item_is_veg', 'quantity', 'price',
+            'food_item_image', 'food_item_is_veg', 'quantity', 'price', 'user_rating',
         ]
 
     def get_food_item_image(self, obj):
@@ -315,6 +316,20 @@ class FoodOrderItemSerializer(serializers.ModelSerializer):
             url = obj.food_item.image_upload.url
             return request.build_absolute_uri(url) if request else url
         return obj.food_item.image_url or ''
+
+    def get_user_rating(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        # Build a per-request cache so we only hit the DB once for all items.
+        cache_key = '_user_reviews_cache'
+        if cache_key not in self.context:
+            self.context[cache_key] = {
+                (r['order_id'], r['food_item_id']): r['rating']
+                for r in Review.objects.filter(user=request.user)
+                                       .values('order_id', 'food_item_id', 'rating')
+            }
+        return self.context[cache_key].get((obj.order_id, obj.food_item_id))
 
 
 class FoodOrderSerializer(serializers.ModelSerializer):
