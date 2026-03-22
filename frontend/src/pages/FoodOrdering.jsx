@@ -341,6 +341,8 @@ function OutletMenu({ outlet, cart, onBack, onAddItem, onOpenCart, itemCount, to
           <option value="rating_asc">⭐ Lowest Rated</option>
           <option value="price_asc">💰 Lowest Price</option>
           <option value="price_desc">💰 Highest Price</option>
+          <option value="name_asc">🔤 Name (A–Z)</option>
+          <option value="name_desc">🔤 Name (Z–A)</option>
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem', cursor: 'pointer' }}>
           <input type="checkbox" checked={availableOnly} onChange={e => setAvailableOnly(e.target.checked)} />
@@ -694,12 +696,20 @@ function OrderCard({ order, onCancel, onReview, readonly }) {
       {/* Items */}
       <div style={{ marginBottom: '0.75rem' }}>
         {order.order_items.map(oi => (
-          <div key={oi.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', padding: '0.2rem 0' }}>
-            <span>
-              <span style={{ color: oi.food_item_is_veg ? '#16a34a' : '#dc2626' }}>●</span>
-              {' '}{oi.food_item_name} × {oi.quantity}
-            </span>
-            <span style={{ fontWeight: 600 }}>{fmtPrice(parseFloat(oi.price) * oi.quantity)}</span>
+          <div key={oi.id} style={{ padding: '0.3rem 0', borderBottom: '1px solid #f9fafb' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
+              <span>
+                <span style={{ color: oi.food_item_is_veg ? '#16a34a' : '#dc2626' }}>●</span>
+                {' '}{oi.food_item_name} × {oi.quantity}
+              </span>
+              <span style={{ fontWeight: 600 }}>{fmtPrice(parseFloat(oi.price) * oi.quantity)}</span>
+            </div>
+            {order.reviewed && oi.user_rating != null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                <StarRating value={oi.user_rating} size={13} />
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Your rating</span>
+              </div>
+            )}
           </div>
         ))}
       </div>

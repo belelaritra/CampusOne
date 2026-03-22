@@ -643,6 +643,8 @@ class FoodOutletMenuView(generics.ListAPIView):
             'rating_asc':  'avg_rating',
             'price_desc':  '-price',
             'price_asc':   'price',
+            'name_asc':    'name',
+            'name_desc':   '-name',
         }
         sort_by = self.request.query_params.get('sort_by', 'rating_desc')
         qs = qs.order_by(sort_map.get(sort_by, '-avg_rating'))
