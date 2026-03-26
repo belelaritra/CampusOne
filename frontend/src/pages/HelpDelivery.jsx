@@ -500,7 +500,7 @@ function CreateTab() {
 // ---------------------------------------------------------------------------
 // MyRequestsTab
 // ---------------------------------------------------------------------------
-function MyRequestsTab({ user, updateUser }) {
+function MyRequestsTab({ user, updateUser, onActiveAcceptedChange }) {
   const [requests,   setRequests]   = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [actionBusy, setActionBusy] = useState(null);
@@ -509,9 +509,17 @@ function MyRequestsTab({ user, updateUser }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setRequests(await getMyRequests()); } catch { /**/ }
+    try {
+      const data = await getMyRequests();
+      setRequests(data);
+      // Keep parent's hasActiveAccepted in sync
+      const activeAccepted = data.some(
+        r => r.helper_username === user?.username && r.status === 'ACCEPTED'
+      );
+      onActiveAcceptedChange?.(activeAccepted);
+    } catch { /**/ }
     finally { setLoading(false); }
-  }, []);
+  }, [user, onActiveAcceptedChange]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
@@ -520,10 +528,14 @@ function MyRequestsTab({ user, updateUser }) {
     setMsg(''); setActionBusy(id);
     try {
       const res = await completeRequest(id);
-      // Update points instantly if this user is the helper
-      if (res.helper_username === user?.username && res.helper_points != null) {
-        updateUser({ points: res.helper_points });
+      // Update points instantly — for both the helper and the requester (whose tab this is)
+      if (res.helper_points != null) {
+        if (res.helper_username === user?.username) {
+          // Current user is the helper — update their own points
+          updateUser({ points: res.helper_points });
+        }
       }
+      onActiveAcceptedChange?.(false);   // delivery done, unlock accept buttons
       setMsg('✅ Marked as delivered! Helper earned 1 point.');
       load();
     } catch (err) {
