@@ -345,6 +345,158 @@ class Review(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Lost & Found Module
+# ---------------------------------------------------------------------------
+
+LF_CAMPUS_LOCATIONS = [
+    ('main_gate',     'Main Gate'),
+    ('gulmohar',      'Gulmohar'),
+    ('shree_balaji',  'Shree Balaji Fruit & Vegetable'),
+    ('central_lib',   'Central Library'),
+    ('lecture_hall',  'Lecture Hall Complex'),
+    ('kresit',        'KReSIT'),
+    ('sac',           'Students Activity Centre'),
+    ('gymkhana',      'Students Gymkhana'),
+    ('main_building', 'Main Building'),
+    ('conv_hall',     'Convocation Hall'),
+    ('sjmsom',        'SJMSOM'),
+    ('hostel_1',  'Hostel 1'),  ('hostel_2',  'Hostel 2'),
+    ('hostel_3',  'Hostel 3'),  ('hostel_4',  'Hostel 4'),
+    ('hostel_5',  'Hostel 5'),  ('hostel_6',  'Hostel 6'),
+    ('hostel_7',  'Hostel 7'),  ('hostel_8',  'Hostel 8'),
+    ('hostel_9',  'Hostel 9'),  ('hostel_10', 'Hostel 10'),
+    ('hostel_11', 'Hostel 11'), ('hostel_12', 'Hostel 12'),
+    ('hostel_13', 'Hostel 13'), ('hostel_14', 'Hostel 14'),
+    ('hostel_15', 'Hostel 15'), ('hostel_16', 'Hostel 16'),
+    ('hostel_17', 'Hostel 17'), ('hostel_18', 'Hostel 18'),
+    ('hostel_19', 'Hostel 19'), ('hostel_21', 'Hostel 21'),
+    ('tansa_house', 'Tansa House'),
+    ('other',       'Other / Custom'),
+]
+
+LF_CONTACT_CHOICES = [
+    ('ME',       'Direct (my contact)'),
+    ('SECURITY', 'Security Office'),
+]
+
+
+class LFCategory(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    icon = models.CharField(max_length=10, default='📦')
+
+    class Meta:
+        verbose_name        = 'LF Category'
+        verbose_name_plural = 'LF Categories'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class LFItem(models.Model):
+    TYPE_LOST   = 'LOST'
+    TYPE_FOUND  = 'FOUND'
+    TYPE_CHOICES = [('LOST', 'Lost'), ('FOUND', 'Found')]
+
+    STATUS_PENDING     = 'PENDING'
+    STATUS_CLAIMED     = 'CLAIMED'
+    STATUS_HANDED_OVER = 'HANDED_OVER'
+    STATUS_CLOSED      = 'CLOSED'
+    STATUS_CHOICES = [
+        ('PENDING',     'Pending'),
+        ('CLAIMED',     'Claimed'),
+        ('HANDED_OVER', 'Handed Over'),
+        ('CLOSED',      'Closed'),
+    ]
+
+    reporter      = models.ForeignKey(User, on_delete=models.CASCADE,  related_name='lf_items')
+    item_type     = models.CharField(max_length=10, choices=TYPE_CHOICES, db_index=True)
+    status        = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+    title         = models.CharField(max_length=200)
+    description   = models.TextField(blank=True, default='')
+    category      = models.ForeignKey(
+        LFCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='items'
+    )
+    tags          = models.JSONField(default=list)           # list of lowercase strings
+    image         = models.ImageField(upload_to='lf_items/', blank=True, null=True)
+    image_url     = models.CharField(max_length=500, blank=True, default='')
+
+    location_name = models.CharField(max_length=150, blank=True, default='')
+    latitude      = models.FloatField(null=True, blank=True)
+    longitude     = models.FloatField(null=True, blank=True)
+
+    contact_type  = models.CharField(max_length=15, choices=LF_CONTACT_CHOICES, default='ME')
+    roll_number   = models.CharField(max_length=20, blank=True, default='')  # ID-card special case
+
+    date_reported = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date_reported']
+        indexes  = [models.Index(fields=['item_type', 'status'])]
+
+    def __str__(self):
+        return f"[{self.item_type}] {self.title} – {self.reporter.username}"
+
+    @property
+    def image_effective(self):
+        if self.image:
+            return self.image.url
+        return self.image_url or ''
+
+
+class LFClaim(models.Model):
+    STATUS_PENDING  = 'PENDING'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_CHOICES  = [
+        ('PENDING',  'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
+
+    item       = models.ForeignKey(LFItem, on_delete=models.CASCADE, related_name='claims')
+    claimant   = models.ForeignKey(User,   on_delete=models.CASCADE, related_name='lf_claims')
+    message    = models.TextField(blank=True, default='')
+    status     = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('item', 'claimant')]
+        ordering        = ['-created_at']
+
+    def __str__(self):
+        return f"{self.claimant.username} → {self.item.title}"
+
+
+class LFNotification(models.Model):
+    user       = models.ForeignKey(User,   on_delete=models.CASCADE,  related_name='lf_notifications')
+    item       = models.ForeignKey(LFItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='notifications')
+    message    = models.TextField()
+    is_read    = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"→{self.user.username}: {self.message[:40]}"
+
+
+class LFLog(models.Model):
+    item       = models.ForeignKey(LFItem, on_delete=models.CASCADE,  related_name='logs')
+    actor      = models.ForeignKey(User,   on_delete=models.SET_NULL, null=True, related_name='lf_logs')
+    action     = models.CharField(max_length=30)  # POSTED / CLAIMED / CLOSED / EDITED / HANDED_OVER
+    detail     = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.action} on #{self.item_id} by {self.actor_id}"
+
+
+# ---------------------------------------------------------------------------
 # Legacy campus models (unchanged)
 # ---------------------------------------------------------------------------
 

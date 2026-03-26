@@ -9,6 +9,15 @@ help_router = DefaultRouter()
 help_router.register(r'', views.HelpRequestViewSet, basename='help')
 
 # ---------------------------------------------------------------------------
+# Lost & Found routers
+# ---------------------------------------------------------------------------
+lf_item_router = DefaultRouter()
+lf_item_router.register(r'items', views.LFItemViewSet, basename='lf-item')
+
+lf_notif_router = DefaultRouter()
+lf_notif_router.register(r'notifications', views.LFNotificationViewSet, basename='lf-notif')
+
+# ---------------------------------------------------------------------------
 # Food Ordering — admin menu router
 # ---------------------------------------------------------------------------
 food_admin_menu_router = DefaultRouter()
@@ -63,6 +72,13 @@ urlpatterns = [
     path('food/analytics/top-food-items/', views.TopFoodItemsAnalyticsView.as_view(), name='food-analytics-top'),
     path('food/analytics/time-wise/',      views.TimeWiseAnalyticsView.as_view(),     name='food-analytics-time'),
     path('food/analytics/daily-sales/',    views.DailySalesAnalyticsView.as_view(),   name='food-analytics-daily'),
+
+    # --- Lost & Found ---
+    path('lf/', include(lf_item_router.urls)),
+    path('lf/', include(lf_notif_router.urls)),
+    path('lf/my-claims/',   views.LFClaimListView.as_view(),    name='lf-my-claims'),
+    path('lf/categories/',  views.LFCategoryListView.as_view(), name='lf-categories'),
+    path('lf/analytics/',   views.LFAnalyticsView.as_view(),    name='lf-analytics'),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),

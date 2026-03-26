@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from .models import (
@@ -8,6 +10,8 @@ from .models import (
     # Food Ordering
     Outlet, MenuItem, OutletAdmin, FoodOrder, FoodOrderItem, Review,
     FOOD_DELIVERY_LOCATION_CHOICES, FOOD_ORDER_TYPE_CHOICES,
+    # Lost & Found
+    LFCategory, LFItem, LFClaim, LFNotification, LFLog,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -396,3 +400,160 @@ class RatingInputSerializer(serializers.Serializer):
 
 class ReviewSubmitSerializer(serializers.Serializer):
     ratings = RatingInputSerializer(many=True, min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Lost & Found Serializers
+# ---------------------------------------------------------------------------
+
+class _TagsField(serializers.Field):
+    """Accepts a list, a JSON string, or a comma-separated string. Always returns a list."""
+    def to_representation(self, value):
+        return value or []
+
+    def to_internal_value(self, data):
+        if isinstance(data, list):
+            tags = data
+        elif isinstance(data, str):
+            try:
+                parsed = json.loads(data)
+                tags = parsed if isinstance(parsed, list) else data.split(',')
+            except (json.JSONDecodeError, ValueError):
+                tags = data.split(',')
+        else:
+            return []
+        return list(dict.fromkeys(t.strip().lower() for t in tags if t.strip()))[:15]
+
+
+class LFCategorySerializer(serializers.ModelSerializer):
+    item_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = LFCategory
+        fields = ['id', 'name', 'icon', 'item_count']
+
+    def get_item_count(self, obj):
+        return getattr(obj, '_item_count', None)
+
+
+class LFItemSerializer(serializers.ModelSerializer):
+    """Full read serializer — includes distance (annotated by view) and claim info."""
+    reporter_username = serializers.CharField(source='reporter.username',    read_only=True)
+    reporter_name     = serializers.CharField(source='reporter.full_name',   read_only=True)
+    reporter_roll     = serializers.CharField(source='reporter.roll_number', read_only=True)
+    reporter_phone    = serializers.SerializerMethodField()
+    category_name     = serializers.CharField(source='category.name', read_only=True, allow_null=True)
+    category_icon     = serializers.CharField(source='category.icon', read_only=True, allow_null=True)
+    image_effective   = serializers.SerializerMethodField()
+    claim_count       = serializers.SerializerMethodField()
+    user_has_claimed  = serializers.SerializerMethodField()
+    distance_meters   = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = LFItem
+        fields = [
+            'id', 'item_type', 'status', 'title', 'description',
+            'category', 'category_name', 'category_icon',
+            'tags', 'image_effective',
+            'location_name', 'latitude', 'longitude',
+            'contact_type', 'roll_number',
+            'reporter_username', 'reporter_name', 'reporter_roll', 'reporter_phone',
+            'claim_count', 'user_has_claimed', 'distance_meters',
+            'date_reported',
+        ]
+
+    def get_reporter_phone(self, obj):
+        """Visible only to the reporter themselves or anyone who has claimed the item."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        u = request.user
+        if obj.reporter_id == u.id:
+            return obj.reporter.phone_number or obj.reporter.phone or None
+        if obj.claims.filter(claimant_id=u.id).exists():
+            return obj.reporter.phone_number or obj.reporter.phone or None
+        return None
+
+    def get_image_effective(self, obj):
+        request = self.context.get('request')
+        if obj.image:
+            url = obj.image.url
+            return request.build_absolute_uri(url) if request else url
+        return obj.image_url or None
+
+    def get_claim_count(self, obj):
+        return getattr(obj, '_claim_count', obj.claims.count())
+
+    def get_user_has_claimed(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return getattr(obj, '_user_has_claimed', None)
+
+    def get_distance_meters(self, obj):
+        return getattr(obj, '_distance', None)
+
+
+class LFItemCreateSerializer(serializers.ModelSerializer):
+    tags      = _TagsField(required=False, default=list)
+    image     = serializers.ImageField(required=False, allow_null=True)
+    latitude  = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+
+    class Meta:
+        model  = LFItem
+        fields = [
+            'item_type', 'title', 'description',
+            'category', 'tags', 'image', 'image_url',
+            'location_name', 'latitude', 'longitude',
+            'contact_type', 'roll_number',
+        ]
+
+    def validate_item_type(self, v):
+        if v not in ['LOST', 'FOUND']:
+            raise serializers.ValidationError("Must be LOST or FOUND.")
+        return v
+
+
+class LFClaimSerializer(serializers.ModelSerializer):
+    claimant_username  = serializers.CharField(source='claimant.username',    read_only=True)
+    claimant_name      = serializers.CharField(source='claimant.full_name',   read_only=True)
+    claimant_phone     = serializers.SerializerMethodField()
+    item_title         = serializers.CharField(source='item.title',           read_only=True)
+    item_type          = serializers.CharField(source='item.item_type',       read_only=True)
+    item_location      = serializers.CharField(source='item.location_name',   read_only=True)
+    item_image         = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = LFClaim
+        fields = [
+            'id', 'item', 'item_title', 'item_type', 'item_location', 'item_image',
+            'claimant_username', 'claimant_name', 'claimant_phone',
+            'message', 'status', 'created_at',
+        ]
+        read_only_fields = ['id', 'status', 'created_at']
+
+    def get_claimant_phone(self, obj):
+        # Visible to the item reporter in the claims list
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            if obj.item.reporter_id == request.user.id or obj.claimant_id == request.user.id:
+                return obj.claimant.phone_number or obj.claimant.phone or None
+        return None
+
+    def get_item_image(self, obj):
+        request = self.context.get('request')
+        if obj.item.image:
+            url = obj.item.image.url
+            return request.build_absolute_uri(url) if request else url
+        return obj.item.image_url or None
+
+
+class LFNotificationSerializer(serializers.ModelSerializer):
+    item_title = serializers.CharField(source='item.title',     read_only=True, allow_null=True)
+    item_type  = serializers.CharField(source='item.item_type', read_only=True, allow_null=True)
+
+    class Meta:
+        model  = LFNotification
+        fields = ['id', 'message', 'item', 'item_title', 'item_type', 'is_read', 'created_at']
+        read_only_fields = fields

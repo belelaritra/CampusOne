@@ -21,6 +21,8 @@ from .models import (
     # Food Ordering
     Outlet, MenuItem, OutletAdmin, FoodOrder, FoodOrderItem, Review,
     FOOD_DELIVERY_LOCATION_CHOICES, FOOD_ACTIVE_STATUSES,
+    # Lost & Found
+    LFCategory, LFItem, LFClaim, LFNotification, LFLog,
 )
 from .serializers import (
     RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
@@ -31,6 +33,9 @@ from .serializers import (
     # Food Ordering
     OutletSerializer, MenuItemSerializer, MenuItemWriteSerializer,
     FoodOrderSerializer, PlaceOrderSerializer, ReviewSubmitSerializer,
+    # Lost & Found
+    LFCategorySerializer, LFItemSerializer, LFItemCreateSerializer,
+    LFClaimSerializer, LFNotificationSerializer,
 )
 
 
@@ -1111,3 +1116,447 @@ class DailySalesAnalyticsView(AnalyticsBaseView):
             for row in data
         ]
         return Response(result)
+
+
+# ===========================================================================
+# Lost & Found Module
+# ===========================================================================
+
+# Approximate campus coords for distance calculation when item has no GPS data
+LF_LOCATION_COORDS = {
+    'main_gate':     (19.12845641460189,  72.91926132752846),
+    'gulmohar':      (19.129814529274448, 72.91533444403758),
+    'shree_balaji':  (19.135117507090506, 72.90574766165889),
+    'central_lib':   (19.13332, 72.91318),
+    'lecture_hall':  (19.13260, 72.91182),
+    'kresit':        (19.13400, 72.91090),
+    'sac':           (19.13100, 72.91550),
+    'gymkhana':      (19.13050, 72.91500),
+    'main_building': (19.13360, 72.91270),
+    'conv_hall':     (19.13220, 72.91050),
+    'sjmsom':        (19.13520, 72.90980),
+}
+
+
+def _lf_suggestion_score(candidate, ref_tags, ref_words, ref_cat_id):
+    score = 0
+    c_tags = set(t.lower() for t in (candidate.tags or []))
+    score += len(ref_tags & c_tags) * 3
+    if ref_cat_id and candidate.category_id == ref_cat_id:
+        score += 5
+    c_words = set(candidate.title.lower().split())
+    score += len(ref_words & c_words) * 2
+    return score
+
+
+def _annotate_distance(items, user_lat, user_lng):
+    for item in items:
+        lat = item.latitude
+        lng = item.longitude
+        if lat is None or lng is None:
+            loc_key = item.location_name.lower().replace(' ', '_').replace('&', 'and')
+            coords = LF_LOCATION_COORDS.get(loc_key)
+            if coords:
+                lat, lng = coords
+        if lat is not None and lng is not None:
+            item._distance = round(haversine(user_lat, user_lng, lat, lng))
+        else:
+            item._distance = None
+
+
+def _annotate_claims(items, user_id):
+    """Attach _claim_count and _user_has_claimed to each item avoiding N+1."""
+    if not items:
+        return
+    ids = [i.pk for i in items]
+    counts = dict(
+        LFClaim.objects.filter(item_id__in=ids)
+        .values('item_id').annotate(n=Count('id')).values_list('item_id', 'n')
+    )
+    user_claims = set(
+        LFClaim.objects.filter(item_id__in=ids, claimant_id=user_id)
+        .values_list('item_id', flat=True)
+    )
+    for item in items:
+        item._claim_count = counts.get(item.pk, 0)
+        item._user_has_claimed = item.pk in user_claims
+
+
+def _bulk_notify_found(found_item, reporter):
+    """Notify matching LOST reporters when a FOUND item is posted. Uses bulk_create."""
+    found_tags  = set(t.lower() for t in (found_item.tags or []))
+    found_words = set(found_item.title.lower().split())
+
+    lost_qs = (
+        LFItem.objects
+        .filter(item_type=LFItem.TYPE_LOST, status=LFItem.STATUS_PENDING)
+        .exclude(reporter=reporter)
+        .select_related('reporter')
+    )
+
+    notifications = []
+    notified = set()
+    for lost in lost_qs:
+        if lost.reporter_id in notified:
+            continue
+        if _lf_suggestion_score(lost, found_tags, found_words, found_item.category_id) > 0:
+            notifications.append(LFNotification(
+                user=lost.reporter,
+                item=found_item,
+                message=(
+                    f"A found item may match your lost '{lost.title}': "
+                    f"\"{found_item.title}\" at {found_item.location_name or 'campus'}"
+                ),
+            ))
+            notified.add(lost.reporter_id)
+
+    # ID-card: direct notification to the owner by roll number
+    if found_item.roll_number:
+        try:
+            id_owner = User.objects.get(roll_number=found_item.roll_number)
+            if id_owner.id not in notified and id_owner != reporter:
+                notifications.append(LFNotification(
+                    user=id_owner,
+                    item=found_item,
+                    message=(
+                        f"Your ID card has been found at "
+                        f"{found_item.location_name or 'campus'}. "
+                        f"Contact the finder to collect it."
+                    ),
+                ))
+        except User.DoesNotExist:
+            pass
+
+    if notifications:
+        LFNotification.objects.bulk_create(notifications, ignore_conflicts=True)
+
+
+# ---------------------------------------------------------------------------
+class LFItemViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/?type=&status=PENDING&category=&q=&tags=&lat=&lng=
+    # ------------------------------------------------------------------
+    def list(self, request):
+        item_type  = request.query_params.get('type', '')
+        status_f   = request.query_params.get('status', 'PENDING')
+        category   = request.query_params.get('category', '')
+        q          = request.query_params.get('q', '').strip().lower()
+        tags_param = request.query_params.get('tags', '')
+        lat_str    = request.query_params.get('lat', '')
+        lng_str    = request.query_params.get('lng', '')
+
+        qs = LFItem.objects.select_related('reporter', 'category')
+
+        if item_type in ('LOST', 'FOUND'):
+            qs = qs.filter(item_type=item_type)
+        if status_f:
+            qs = qs.filter(status=status_f)
+        if category:
+            qs = qs.filter(category_id=category)
+        if q:
+            qs = qs.filter(
+                Q(title__icontains=q) | Q(description__icontains=q) | Q(tags__icontains=q)
+            )
+        for tag in (t.strip().lower() for t in tags_param.split(',') if t.strip()):
+            qs = qs.filter(tags__icontains=tag)
+
+        items = list(qs)
+
+        try:
+            user_lat = float(lat_str)
+            user_lng = float(lng_str)
+            _annotate_distance(items, user_lat, user_lng)
+        except (ValueError, TypeError):
+            for item in items:
+                item._distance = None
+
+        _annotate_claims(items, request.user.id)
+        serializer = LFItemSerializer(items, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    # ------------------------------------------------------------------
+    # POST /api/lf/items/
+    # ------------------------------------------------------------------
+    def create(self, request):
+        serializer = LFItemCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            item = serializer.save(reporter=request.user)
+            LFLog.objects.create(
+                item=item, actor=request.user, action='POSTED',
+                detail=f"{item.item_type}: {item.title}",
+            )
+            if item.item_type == LFItem.TYPE_FOUND:
+                _bulk_notify_found(item, request.user)
+
+        _annotate_claims([item], request.user.id)
+        return Response(
+            LFItemSerializer(item, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/{id}/
+    # ------------------------------------------------------------------
+    def retrieve(self, request, pk=None):
+        try:
+            item = LFItem.objects.select_related('reporter', 'category').get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+        _annotate_claims([item], request.user.id)
+        return Response(LFItemSerializer(item, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # PATCH /api/lf/items/{id}/
+    # ------------------------------------------------------------------
+    def partial_update(self, request, pk=None):
+        try:
+            item = LFItem.objects.get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        if item.reporter_id != request.user.id:
+            return Response({'detail': 'Only the reporter can edit this.'}, status=403)
+        if item.status != LFItem.STATUS_PENDING:
+            return Response({'detail': 'Only PENDING items can be edited.'}, status=400)
+
+        serializer = LFItemCreateSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            updated = serializer.save()
+            LFLog.objects.create(item=updated, actor=request.user, action='EDITED')
+
+        _annotate_claims([updated], request.user.id)
+        return Response(LFItemSerializer(updated, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # DELETE /api/lf/items/{id}/
+    # ------------------------------------------------------------------
+    def destroy(self, request, pk=None):
+        try:
+            item = LFItem.objects.get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+        if item.reporter_id != request.user.id:
+            return Response({'detail': 'Only the reporter can delete this.'}, status=403)
+        if item.status != LFItem.STATUS_PENDING:
+            return Response({'detail': 'Only PENDING items can be deleted.'}, status=400)
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ------------------------------------------------------------------
+    # POST /api/lf/items/{id}/claim/
+    # ------------------------------------------------------------------
+    @action(detail=True, methods=['post'])
+    def claim(self, request, pk=None):
+        try:
+            item = LFItem.objects.select_related('reporter').get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        if item.reporter_id == request.user.id:
+            return Response({'detail': 'You cannot claim your own item.'}, status=400)
+        if item.status not in (LFItem.STATUS_PENDING, LFItem.STATUS_CLAIMED):
+            return Response({'detail': 'This item is no longer available.'}, status=400)
+
+        message = (request.data.get('message') or '').strip()
+
+        with transaction.atomic():
+            claim, created = LFClaim.objects.get_or_create(
+                item=item, claimant=request.user,
+                defaults={'message': message},
+            )
+            if not created:
+                return Response({'detail': 'You have already claimed this item.'}, status=409)
+
+            # Update item status to CLAIMED
+            LFItem.objects.filter(pk=item.pk).update(status=LFItem.STATUS_CLAIMED)
+            item.status = LFItem.STATUS_CLAIMED
+
+            LFNotification.objects.create(
+                user=item.reporter, item=item,
+                message=(
+                    f"{request.user.full_name or request.user.username} "
+                    f"has claimed your {item.item_type.lower()} item: \"{item.title}\""
+                ),
+            )
+            LFLog.objects.create(item=item, actor=request.user, action='CLAIMED', detail=message)
+
+        _annotate_claims([item], request.user.id)
+        return Response(LFItemSerializer(item, context={'request': request}).data, status=201)
+
+    # ------------------------------------------------------------------
+    # POST /api/lf/items/{id}/close/
+    # ------------------------------------------------------------------
+    @action(detail=True, methods=['post'])
+    def close(self, request, pk=None):
+        try:
+            item = LFItem.objects.get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+        if item.reporter_id != request.user.id:
+            return Response({'detail': 'Only the reporter can close this item.'}, status=403)
+        with transaction.atomic():
+            item.status = LFItem.STATUS_CLOSED
+            item.save(update_fields=['status'])
+            LFLog.objects.create(item=item, actor=request.user, action='CLOSED')
+        _annotate_claims([item], request.user.id)
+        return Response(LFItemSerializer(item, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # POST /api/lf/items/{id}/handover/  (security staff only)
+    # ------------------------------------------------------------------
+    @action(detail=True, methods=['post'])
+    def handover(self, request, pk=None):
+        if not request.user.is_staff:
+            return Response({'detail': 'Security staff only.'}, status=403)
+        try:
+            item = LFItem.objects.get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+        with transaction.atomic():
+            item.status = LFItem.STATUS_HANDED_OVER
+            item.save(update_fields=['status'])
+            LFLog.objects.create(item=item, actor=request.user, action='HANDED_OVER')
+            # Notify reporter
+            LFNotification.objects.create(
+                user=item.reporter, item=item,
+                message=f"Your item \"{item.title}\" has been marked as handed over by security.",
+            )
+        _annotate_claims([item], request.user.id)
+        return Response(LFItemSerializer(item, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/{id}/suggestions/
+    # ------------------------------------------------------------------
+    @action(detail=True, methods=['get'])
+    def suggestions(self, request, pk=None):
+        try:
+            item = LFItem.objects.select_related('category').get(pk=pk)
+        except LFItem.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        opposite   = LFItem.TYPE_FOUND if item.item_type == LFItem.TYPE_LOST else LFItem.TYPE_LOST
+        candidates = list(
+            LFItem.objects.filter(item_type=opposite, status=LFItem.STATUS_PENDING)
+            .select_related('reporter', 'category')
+            .exclude(pk=pk)
+        )
+        ref_tags  = set(t.lower() for t in (item.tags or []))
+        ref_words = set(item.title.lower().split())
+        scored = sorted(
+            ((  _lf_suggestion_score(c, ref_tags, ref_words, item.category_id), c)
+             for c in candidates),
+            key=lambda x: x[0], reverse=True,
+        )
+        top = [c for s, c in scored if s > 0][:10]
+        _annotate_claims(top, request.user.id)
+        return Response(LFItemSerializer(top, many=True, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/my_items/
+    # ------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def my_items(self, request):
+        items = list(
+            LFItem.objects.filter(reporter=request.user)
+            .select_related('category')
+        )
+        _annotate_claims(items, request.user.id)
+        return Response(LFItemSerializer(items, many=True, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/top_tags/
+    # ------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def top_tags(self, request):
+        rows = LFItem.objects.filter(status='PENDING').values_list('tags', flat=True)
+        counter = {}
+        for tag_list in rows:
+            for tag in (tag_list or []):
+                counter[tag] = counter.get(tag, 0) + 1
+        top = sorted(counter.items(), key=lambda x: x[1], reverse=True)[:20]
+        return Response([{'tag': t, 'count': c} for t, c in top])
+
+
+# ---------------------------------------------------------------------------
+class LFClaimListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """All claims the current user has made."""
+        claims = LFClaim.objects.filter(claimant=request.user).select_related(
+            'item__reporter', 'item__category', 'claimant',
+        )
+        return Response(LFClaimSerializer(claims, many=True, context={'request': request}).data)
+
+
+# ---------------------------------------------------------------------------
+class LFNotificationViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        notifs = LFNotification.objects.filter(user=request.user).select_related('item')[:60]
+        return Response(LFNotificationSerializer(notifs, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def read(self, request, pk=None):
+        n = LFNotification.objects.filter(pk=pk, user=request.user).update(is_read=True)
+        if not n:
+            return Response({'detail': 'Not found.'}, status=404)
+        return Response({'detail': 'ok'})
+
+    @action(detail=False, methods=['post'], url_path='mark_all_read')
+    def mark_all_read(self, request):
+        LFNotification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        return Response({'detail': 'All marked as read.'})
+
+
+# ---------------------------------------------------------------------------
+class LFCategoryListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        cats = list(LFCategory.objects.all())
+        # Annotate item_count without hitting DB per category
+        counts = dict(
+            LFItem.objects.filter(status='PENDING')
+            .values('category_id').annotate(n=Count('id')).values_list('category_id', 'n')
+        )
+        for c in cats:
+            c._item_count = counts.get(c.pk, 0)
+        return Response(LFCategorySerializer(cats, many=True).data)
+
+
+# ---------------------------------------------------------------------------
+class LFAnalyticsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        type_counts   = dict(LFItem.objects.values('item_type').annotate(n=Count('id')).values_list('item_type', 'n'))
+        status_counts = dict(LFItem.objects.values('status').annotate(n=Count('id')).values_list('status', 'n'))
+        top_cats      = list(
+            LFItem.objects.exclude(category__isnull=True)
+            .values('category__name', 'category__icon').annotate(n=Count('id')).order_by('-n')[:10]
+        )
+        top_locs      = list(
+            LFItem.objects.exclude(location_name='')
+            .values('location_name').annotate(n=Count('id')).order_by('-n')[:10]
+        )
+        rows = LFItem.objects.values_list('tags', flat=True)
+        tag_c = {}
+        for tl in rows:
+            for t in (tl or []):
+                tag_c[t] = tag_c.get(t, 0) + 1
+        top_tags = sorted(tag_c.items(), key=lambda x: x[1], reverse=True)[:20]
+
+        return Response({
+            'type_counts':    type_counts,
+            'status_counts':  status_counts,
+            'top_categories': top_cats,
+            'top_locations':  top_locs,
+            'top_tags':       [{'tag': t, 'count': c} for t, c in top_tags],
+        })

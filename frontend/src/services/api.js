@@ -106,6 +106,56 @@ export const getAdminRequests  = ()    => api.get('/help/admin_list/').then(r =>
 export const updateProfile     = (data) => api.patch('/auth/me/', data).then(r => r.data);
 
 // ---------------------------------------------------------------------------
+// Lost & Found API
+// ---------------------------------------------------------------------------
+function _lfPayload(data) {
+  // If an image File is present, use multipart; otherwise send JSON
+  if (data.image instanceof File) {
+    const fd = new FormData();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      if (Array.isArray(v)) fd.append(k, JSON.stringify(v));   // tags → JSON string
+      else fd.append(k, v);
+    });
+    return { payload: fd, multipart: true };
+  }
+  return { payload: data, multipart: false };
+}
+
+export const getLFItems = (params = {}) =>
+  api.get('/lf/items/', { params }).then(r => r.data);
+
+export const getLFItem = (id) =>
+  api.get(`/lf/items/${id}/`).then(r => r.data);
+
+export const createLFItem = (data) => {
+  const { payload, multipart } = _lfPayload(data);
+  const cfg = multipart ? { headers: { 'Content-Type': 'multipart/form-data' } } : {};
+  return api.post('/lf/items/', payload, cfg).then(r => r.data);
+};
+
+export const editLFItem = (id, data) => {
+  const { payload, multipart } = _lfPayload(data);
+  const cfg = multipart ? { headers: { 'Content-Type': 'multipart/form-data' } } : {};
+  return api.patch(`/lf/items/${id}/`, payload, cfg).then(r => r.data);
+};
+
+export const deleteLFItem     = (id)          => api.delete(`/lf/items/${id}/`).then(r => r.data);
+export const claimLFItem      = (id, message) => api.post(`/lf/items/${id}/claim/`, { message }).then(r => r.data);
+export const closeLFItem      = (id)          => api.post(`/lf/items/${id}/close/`).then(r => r.data);
+export const handoverLFItem   = (id)          => api.post(`/lf/items/${id}/handover/`).then(r => r.data);
+export const getLFSuggestions = (id)          => api.get(`/lf/items/${id}/suggestions/`).then(r => r.data);
+export const getMyLFItems     = ()            => api.get('/lf/items/my_items/').then(r => r.data);
+export const getLFTopTags     = ()            => api.get('/lf/items/top_tags/').then(r => r.data);
+export const getMyClaims      = ()            => api.get('/lf/my-claims/').then(r => r.data);
+export const getLFCategories  = ()            => api.get('/lf/categories/').then(r => r.data);
+export const getLFAnalytics   = ()            => api.get('/lf/analytics/').then(r => r.data);
+
+export const getLFNotifications  = ()   => api.get('/lf/notifications/').then(r => r.data);
+export const markLFNotifRead     = (id) => api.post(`/lf/notifications/${id}/read/`).then(r => r.data);
+export const markAllLFNotifsRead = ()   => api.post('/lf/notifications/mark_all_read/').then(r => r.data);
+
+// ---------------------------------------------------------------------------
 // Legacy Campus API (unchanged)
 // ---------------------------------------------------------------------------
 export const getHostels    = () => api.get('/hostels/').then(r => r.data);
