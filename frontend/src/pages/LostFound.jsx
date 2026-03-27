@@ -3,8 +3,10 @@ import { SectionHeader } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   getLFItems, createLFItem, editLFItem, deleteLFItem,
-  claimLFItem, closeLFItem, getLFSuggestions,
-  getMyLFItems, getMyClaims, getLFTopTags, getLFCategories,
+  interactLFItem, resolveLFItem, revertLFItem,
+  getLFSuggestions,
+  getMyLFItems, getPendingLFItems, getHistoryLFItems,
+  getMyClaims, getLFTopTags, getLFCategories,
   getLFNotifications, markAllLFNotifsRead,
 } from '../services/api';
 
@@ -27,6 +29,30 @@ function whatsappLink(phone) {
   return `https://wa.me/${num}`;
 }
 
+function ContactChip({ name, phone }) {
+  if (!name) return null;
+  const wa = whatsappLink(phone);
+  return (
+    <div style={{
+      background: '#f0fdf4', borderRadius: 8, padding: '0.45rem 0.65rem',
+      fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: 2,
+    }}>
+      <span>👤 <strong>{name}</strong></span>
+      {phone && (
+        <span>
+          📞 {phone}
+          {wa && (
+            <a href={wa} target="_blank" rel="noreferrer"
+              style={{ marginLeft: 8, color: '#16a34a', fontWeight: 600 }}>
+              WhatsApp
+            </a>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Notification Bell
 // ---------------------------------------------------------------------------
@@ -44,7 +70,7 @@ function NotifBell({ notifs, onMarkAll }) {
         🔔
         {unread > 0 && (
           <span style={{
-            position: 'absolute', top: 0, right: 0, transform: 'translate(40%, -40%)',
+            position: 'absolute', top: 0, right: 0, transform: 'translate(40%,-40%)',
             background: '#ef4444', color: '#fff', borderRadius: '999px',
             fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.35rem', lineHeight: 1,
           }}>{unread}</span>
@@ -53,8 +79,7 @@ function NotifBell({ notifs, onMarkAll }) {
       {open && (
         <div style={{
           position: 'absolute', right: 0, top: '110%', zIndex: 100, width: 320,
-          background: 'var(--bg-card, #fff)',
-          border: '1px solid var(--border, #e5e7eb)',
+          background: 'var(--bg-card,#fff)', border: '1px solid var(--border,#e5e7eb)',
           borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
           maxHeight: 380, overflowY: 'auto',
         }}>
@@ -63,7 +88,7 @@ function NotifBell({ notifs, onMarkAll }) {
             : notifs.map(n => (
                 <div key={n.id} style={{
                   padding: '0.65rem 0.9rem',
-                  borderBottom: '1px solid var(--border, #f0f0f0)',
+                  borderBottom: '1px solid var(--border,#f0f0f0)',
                   background: n.is_read ? 'transparent' : '#eff6ff',
                   fontSize: '0.82rem',
                 }}>
@@ -78,11 +103,11 @@ function NotifBell({ notifs, onMarkAll }) {
 }
 
 // ---------------------------------------------------------------------------
-// Item Card (square grid)
+// Shared layout constants
 // ---------------------------------------------------------------------------
 const CARD_STYLE = {
-  background: 'var(--bg-card, #fff)',
-  border: '1px solid var(--border, #e5e7eb)',
+  background: 'var(--bg-card,#fff)',
+  border: '1px solid var(--border,#e5e7eb)',
   borderRadius: 16,
   overflow: 'hidden',
   display: 'flex',
@@ -98,13 +123,23 @@ const GRID = {
   alignItems: 'start',
 };
 
-function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compact = false }) {
-  const isLost   = item.item_type === 'LOST';
-  const isOwner  = item.reporter_username === currentUser?.username;
-  const canAct   = !isOwner && item.status === 'PENDING' && !item.user_has_claimed;
-  const canClose = isOwner && (item.status === 'PENDING' || item.status === 'CLAIMED');
-  const canEdit  = isOwner && item.status === 'PENDING';
-  const canDel   = isOwner && item.status === 'PENDING';
+// Status badge background/color for non-AVAILABLE items
+function statusBadge(s) {
+  if (s === 'PENDING')  return { bg: '#fef3c7', color: '#92400e' };
+  if (s === 'RESOLVED') return { bg: '#dcfce7', color: '#15803d' };
+  return { bg: '#f3f4f6', color: '#374151' };
+}
+
+// ---------------------------------------------------------------------------
+// Item Card — Dashboard (AVAILABLE items)
+// ---------------------------------------------------------------------------
+function ItemCard({ item, currentUser, onInteract, onEdit, onDelete, compact = false }) {
+  const isLost  = item.item_type === 'LOST';
+  const isOwner = item.reporter_username === currentUser?.username;
+  // Only non-owners can interact; only on AVAILABLE items
+  const canInteract = !isOwner && item.status === 'AVAILABLE' && !item.user_has_claimed;
+  const canEdit     = isOwner && item.status === 'AVAILABLE';
+  const canDel      = isOwner && item.status === 'AVAILABLE';
 
   const mapsUrl = item.latitude && item.longitude
     ? `https://www.google.com/maps?q=${item.latitude},${item.longitude}`
@@ -116,7 +151,6 @@ function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compa
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = CARD_STYLE.boxShadow; }}
     >
-      {/* Square image area */}
       <div style={{ width: '100%', aspectRatio: '1/1', background: '#f3f4f6', position: 'relative', flexShrink: 0 }}>
         {item.image_effective
           ? <img src={item.image_effective} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -124,28 +158,25 @@ function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compa
               {item.category_icon || '📦'}
             </div>
         }
-        {/* Type badge */}
         <span style={{
           position: 'absolute', top: 8, left: 8,
           background: isLost ? '#ef4444' : '#22c55e',
           color: '#fff', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
           padding: '0.2rem 0.5rem', letterSpacing: '0.04em',
         }}>{item.item_type}</span>
-        {/* Non-pending status */}
-        {item.status !== 'PENDING' && (
+        {item.status !== 'AVAILABLE' && (
           <span style={{
             position: 'absolute', top: 8, right: 8,
-            background: '#6b7280', color: '#fff', borderRadius: 6,
-            fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem',
-          }}>{item.status.replace('_', ' ')}</span>
+            ...statusBadge(item.status),
+            borderRadius: 6, fontSize: '0.65rem', fontWeight: 700,
+            padding: '0.15rem 0.45rem',
+          }}>{item.status}</span>
         )}
       </div>
 
-      {/* Body */}
       <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', flex: 1 }}>
         <strong style={{ fontSize: '0.9rem', lineHeight: 1.3 }}>{item.title}</strong>
 
-        {/* Category + tags */}
         {(item.category_name || (item.tags?.length > 0)) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
             {item.category_name && (
@@ -154,27 +185,21 @@ function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compa
               </span>
             )}
             {(item.tags || []).slice(0, 3).map(t => (
-              <span key={t} style={{ fontSize: '0.7rem', background: '#eff6ff', borderRadius: 4, padding: '0.15rem 0.4rem', color: '#1d4ed8' }}>
-                #{t}
-              </span>
+              <span key={t} style={{ fontSize: '0.7rem', background: '#eff6ff', borderRadius: 4, padding: '0.15rem 0.4rem', color: '#1d4ed8' }}>#{t}</span>
             ))}
           </div>
         )}
 
-        {/* Location */}
         <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-          📍{' '}
-          {mapsUrl
+          📍 {mapsUrl
             ? <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{item.location_name || 'View map'}</a>
             : (item.location_name || '—')}
         </div>
 
-        {/* Distance */}
         {item.distance_meters != null && (
           <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>🗺️ {item.distance_meters}m away</div>
         )}
 
-        {/* Time + reporter */}
         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
           🕐 {timeAgo(item.date_reported)}
           {' · '}
@@ -182,41 +207,17 @@ function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compa
           {item.reporter_roll ? ` (${item.reporter_roll})` : ''}
         </div>
 
-        {/* Claim count */}
-        {item.claim_count > 0 && (
-          <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>
-            🙋 {item.claim_count} {item.claim_count === 1 ? 'person' : 'people'} claimed
-          </div>
-        )}
-
-        {/* Reporter phone (after claim) */}
-        {item.reporter_phone && (
-          <div style={{ fontSize: '0.78rem', background: '#f0fdf4', borderRadius: 6, padding: '0.3rem 0.5rem' }}>
-            📞 {item.reporter_phone}
-            {whatsappLink(item.reporter_phone) && (
-              <a href={whatsappLink(item.reporter_phone)} target="_blank" rel="noreferrer"
-                style={{ marginLeft: 6, color: '#16a34a', fontWeight: 600 }}>WhatsApp</a>
-            )}
-          </div>
-        )}
-
-        {/* Actions */}
         {!compact && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: 'auto', paddingTop: '0.4rem' }}>
-            {canAct && (
+            {canInteract && (
               <button className="btn btn-primary"
                 style={{ fontSize: '0.78rem', padding: '0.3rem 0.7rem', flex: 1 }}
-                onClick={() => onClaim && onClaim(item)}>
-                {isLost ? '🙋 I Found It' : '🏷️ Claim'}
+                onClick={() => onInteract && onInteract(item)}>
+                {isLost ? '🙋 Mark I have found' : '🏷️ Claim'}
               </button>
             )}
             {item.user_has_claimed && (
-              <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600, padding: '0.3rem 0' }}>✅ Claimed</span>
-            )}
-            {canClose && (
-              <button className="btn"
-                style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}
-                onClick={() => onClose && onClose(item.id)}>✅ Resolved</button>
+              <span style={{ fontSize: '0.75rem', color: '#92400e', fontWeight: 600, padding: '0.3rem 0' }}>⏳ Pending</span>
             )}
             {canEdit && (
               <button className="btn"
@@ -236,40 +237,151 @@ function ItemCard({ item, currentUser, onClaim, onClose, onEdit, onDelete, compa
 }
 
 // ---------------------------------------------------------------------------
-// Claim Modal
+// Pending Item Card — for the Pending tab
+// Shows contact info + action buttons for reporter; waiting message for interactor.
 // ---------------------------------------------------------------------------
-function ClaimModal({ item, onConfirm, onCancel, busy }) {
+function PendingItemCard({ item, onResolve, onRevert, busy }) {
+  const isLost       = item.item_type === 'LOST';
+  const isReporter   = item.is_reporter;
+  const isInteractor = item.is_interactor;
+  const interaction  = item.active_interaction;
+
+  const mapsUrl = item.latitude && item.longitude
+    ? `https://www.google.com/maps?q=${item.latitude},${item.longitude}`
+    : null;
+
+  return (
+    <div style={{
+      ...CARD_STYLE,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      minHeight: 120,
+    }}>
+      {/* Thumbnail */}
+      <div style={{ width: 90, flexShrink: 0, background: '#f3f4f6', position: 'relative' }}>
+        {item.image_effective
+          ? <img src={item.image_effective} alt={item.title}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
+              {item.category_icon || '📦'}
+            </div>
+        }
+        <span style={{
+          position: 'absolute', bottom: 4, left: 4,
+          background: isLost ? '#ef4444' : '#22c55e',
+          color: '#fff', borderRadius: 4, fontSize: '0.6rem', fontWeight: 700,
+          padding: '0.1rem 0.35rem',
+        }}>{item.item_type}</span>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: '0.75rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: 0 }}>
+        <strong style={{ fontSize: '0.9rem' }}>{item.title}</strong>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+          📍 {mapsUrl
+            ? <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{item.location_name || 'View map'}</a>
+            : (item.location_name || '—')}
+          {' · '}{timeAgo(item.date_reported)}
+        </div>
+
+        {/* Interaction message */}
+        {interaction?.message && (
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+            💬 "{interaction.message}"
+          </div>
+        )}
+
+        {/* Contact info — visible to involved parties only */}
+        {isReporter && interaction && (
+          <ContactChip
+            name={interaction.interactor_name}
+            phone={interaction.interactor_phone}
+          />
+        )}
+        {isInteractor && interaction && (
+          <ContactChip
+            name={interaction.reporter_name}
+            phone={interaction.reporter_phone}
+          />
+        )}
+
+        {/* Security notice */}
+        {item.contact_type === 'SECURITY' && (
+          <div style={{ background: '#fef3c7', borderRadius: 6, padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}>
+            🏢 Item handled by <strong>Security Office</strong>
+          </div>
+        )}
+
+        {/* Action buttons — reporter only */}
+        {isReporter && (
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: 4 }}>
+            <button
+              className="btn btn-primary"
+              disabled={busy}
+              style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+              onClick={() => onResolve && onResolve(item.id)}>
+              {isLost ? '✅ Received' : '✅ Handed Over'}
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
+              onClick={() => onRevert && onRevert(item.id)}>
+              ↩️ Revert
+            </button>
+          </div>
+        )}
+
+        {isInteractor && (
+          <div style={{ fontSize: '0.78rem', color: '#92400e', fontWeight: 500 }}>
+            ⏳ Waiting for confirmation from reporter
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Interact Modal (was ClaimModal) — "Mark I have found" / "Claim"
+// ---------------------------------------------------------------------------
+function InteractModal({ item, onConfirm, onCancel, busy }) {
   const [msg, setMsg] = useState('');
   if (!item) return null;
+  const isLost = item.item_type === 'LOST';
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
     }}>
       <div style={{
-        background: 'var(--bg-card, #fff)', borderRadius: 16, padding: '1.5rem',
+        background: 'var(--bg-card,#fff)', borderRadius: 16, padding: '1.5rem',
         width: '100%', maxWidth: 440, boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
       }}>
         <h3 style={{ margin: '0 0 0.5rem' }}>
-          {item.item_type === 'LOST' ? '🙋 I Found This Item' : '🏷️ Claim This Item'}
+          {isLost ? '🙋 I Found This Item' : '🏷️ Claim This Item'}
         </h3>
         <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
           <strong>{item.title}</strong> · {item.location_name || 'campus'}
         </p>
         <div className="form-group">
-          <label style={{ fontSize: '0.85rem' }}>Message to reporter (optional)</label>
+          <label style={{ fontSize: '0.85rem' }}>
+            {isLost ? 'Where did you find it?' : 'How can you prove ownership?'} (optional)
+          </label>
           <textarea className="search-input" rows={3} style={{ resize: 'vertical' }}
-            placeholder="Describe where you found it or how to verify ownership…"
+            placeholder={isLost ? 'Describe where you found it…' : 'Describe identifying features…'}
             value={msg} onChange={e => setMsg(e.target.value)} />
         </div>
         {item.contact_type === 'SECURITY' && (
           <div style={{ background: '#fef3c7', borderRadius: 8, padding: '0.6rem 0.8rem', fontSize: '0.82rem', marginTop: '0.75rem' }}>
-            🏢 This item is at the <strong>Security Office</strong>. Bring ID proof to collect.
+            🏢 This item is managed by the <strong>Security Office</strong>. Bring ID proof.
           </div>
         )}
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
           <button className="btn btn-primary" disabled={busy} style={{ flex: 1 }}
-            onClick={() => onConfirm(item.id, msg)}>{busy ? 'Submitting…' : 'Confirm'}</button>
+            onClick={() => onConfirm(item.id, msg)}>
+            {busy ? 'Submitting…' : 'Confirm'}
+          </button>
           <button className="btn" onClick={onCancel}>Cancel</button>
         </div>
       </div>
@@ -278,7 +390,7 @@ function ClaimModal({ item, onConfirm, onCancel, busy }) {
 }
 
 // ---------------------------------------------------------------------------
-// Item Form (create + edit)
+// Item Form (create + edit) — unified, type selector always visible on create
 // ---------------------------------------------------------------------------
 const EMPTY_FORM = {
   item_type: 'LOST', title: '', description: '',
@@ -287,8 +399,8 @@ const EMPTY_FORM = {
   contact_type: 'ME', roll_number: '',
 };
 
-function LFForm({ initial, categories, onSave, onCancel, isEdit = false, defaultType }) {
-  const [form, setForm]       = useState({ ...EMPTY_FORM, item_type: defaultType || 'LOST', ...initial });
+function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
+  const [form, setForm]       = useState({ ...EMPTY_FORM, ...initial });
   const [preview, setPreview] = useState(initial?.image_effective || null);
   const [error, setError]     = useState('');
   const [busy, setBusy]       = useState(false);
@@ -335,11 +447,9 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false, default
       await onSave(payload);
     } catch (err) {
       const d = err.response?.data;
-      if (d && typeof d === 'object') {
-        setError(Object.entries(d).map(([k, v]) => `${k}: ${[v].flat().join(', ')}`).join(' | '));
-      } else {
-        setError('Failed to save. Please check all fields.');
-      }
+      setError(d && typeof d === 'object'
+        ? Object.entries(d).map(([k, v]) => `${k}: ${[v].flat().join(', ')}`).join(' | ')
+        : 'Failed to save. Please check all fields.');
     } finally { setBusy(false); }
   }
 
@@ -350,24 +460,31 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false, default
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 600 }}>
       {error && <div className="auth-error">{error}</div>}
 
-      {/* Type selector */}
-      {!isEdit && (
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          {['LOST', 'FOUND'].map(t => (
-            <label key={t} style={{
-              flex: 1, textAlign: 'center', padding: '0.6rem', borderRadius: 10, cursor: 'pointer',
-              fontWeight: 700, fontSize: '0.9rem',
-              border: form.item_type === t ? `2px solid ${t === 'LOST' ? '#ef4444' : '#22c55e'}` : '2px solid var(--border,#e5e7eb)',
-              background: form.item_type === t ? (t === 'LOST' ? '#fee2e2' : '#dcfce7') : 'var(--bg-secondary,#f9f9f9)',
-              color: form.item_type === t ? (t === 'LOST' ? '#991b1b' : '#15803d') : 'inherit',
-            }}>
-              <input type="radio" name="item_type" value={t} checked={form.item_type === t}
-                onChange={handle} style={{ display: 'none' }} />
-              {t === 'LOST' ? '😟 I Lost This' : '😊 I Found This'}
-            </label>
-          ))}
-        </div>
-      )}
+      {/* Type selector — always shown (even on edit so user knows the type) */}
+      <div style={{ display: 'flex', gap: '0.75rem' }}>
+        {['LOST', 'FOUND'].map(t => (
+          <label key={t} style={{
+            flex: 1, textAlign: 'center', padding: '0.6rem', borderRadius: 10,
+            cursor: isEdit ? 'not-allowed' : 'pointer',
+            fontWeight: 700, fontSize: '0.9rem',
+            border: form.item_type === t
+              ? `2px solid ${t === 'LOST' ? '#ef4444' : '#22c55e'}`
+              : '2px solid var(--border,#e5e7eb)',
+            background: form.item_type === t
+              ? (t === 'LOST' ? '#fee2e2' : '#dcfce7')
+              : 'var(--bg-secondary,#f9f9f9)',
+            color: form.item_type === t
+              ? (t === 'LOST' ? '#991b1b' : '#15803d')
+              : 'inherit',
+            opacity: isEdit ? 0.7 : 1,
+          }}>
+            <input type="radio" name="item_type" value={t}
+              checked={form.item_type === t} onChange={handle}
+              disabled={isEdit} style={{ display: 'none' }} />
+            {t === 'LOST' ? '😟 I Lost This' : '😊 I Found This'}
+          </label>
+        ))}
+      </div>
 
       <div className="form-group">
         <label>Item Name *</label>
@@ -456,18 +573,18 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false, default
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard Tab
+// Dashboard Tab — shows AVAILABLE items; "Mark I have found" / "Claim" buttons
 // ---------------------------------------------------------------------------
-function DashboardTab({ user, categories, onRefreshNotifs }) {
-  const [items,       setItems]      = useState([]);
-  const [loading,     setLoading]    = useState(true);
-  const [topTags,     setTopTags]    = useState([]);
-  const [activeTag,   setActiveTag]  = useState('');
-  const [filter,      setFilter]     = useState({ type: '', category: '', q: '' });
-  const [claimTarget, setClaimTarget] = useState(null);
-  const [claimBusy,   setClaimBusy]  = useState(false);
-  const [msg,         setMsg]        = useState('');
-  const [editTarget,  setEditTarget] = useState(null);
+function DashboardTab({ user, categories, onRefreshNotifs, onGoToPending }) {
+  const [items,        setItems]       = useState([]);
+  const [loading,      setLoading]     = useState(true);
+  const [topTags,      setTopTags]     = useState([]);
+  const [activeTag,    setActiveTag]   = useState('');
+  const [filter,       setFilter]      = useState({ type: '', category: '', q: '' });
+  const [interactTarget, setInteractTarget] = useState(null);
+  const [interactBusy,   setInteractBusy]   = useState(false);
+  const [msg,          setMsg]         = useState('');
+  const [editTarget,   setEditTarget]  = useState(null);
   const posRef = useRef(null);
 
   useEffect(() => {
@@ -480,7 +597,7 @@ function DashboardTab({ user, categories, onRefreshNotifs }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const params = { status: 'PENDING' };
+    const params = { status: 'AVAILABLE' };
     if (filter.type)     params.type     = filter.type;
     if (filter.category) params.category = filter.category;
     if (filter.q)        params.q        = filter.q;
@@ -494,24 +611,19 @@ function DashboardTab({ user, categories, onRefreshNotifs }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getLFTopTags().then(setTopTags).catch(() => {}); }, []);
 
-  async function handleClaim(id, message) {
-    setClaimBusy(true);
+  async function handleInteract(id, message) {
+    setInteractBusy(true);
     try {
-      await claimLFItem(id, message);
-      setClaimTarget(null);
-      setMsg('✅ Claim submitted! Reporter has been notified.');
+      await interactLFItem(id, message);
+      setInteractTarget(null);
+      setMsg('✅ Submitted! You can track it in the Pending tab.');
       onRefreshNotifs();
       load();
+      onGoToPending();
     } catch (err) {
-      setMsg('❌ ' + (err.response?.data?.detail || 'Could not submit claim.'));
-      setClaimTarget(null);
-    } finally { setClaimBusy(false); }
-  }
-
-  async function handleClose(id) {
-    if (!window.confirm('Mark this item as resolved?')) return;
-    try { await closeLFItem(id); setMsg('✅ Marked as resolved.'); load(); }
-    catch (err) { setMsg('❌ ' + (err.response?.data?.detail || 'Error.')); }
+      setMsg('❌ ' + (err.response?.data?.detail || 'Could not submit.'));
+      setInteractTarget(null);
+    } finally { setInteractBusy(false); }
   }
 
   async function handleDelete(id) {
@@ -548,7 +660,6 @@ function DashboardTab({ user, categories, onRefreshNotifs }) {
         }}>{msg}</div>
       )}
 
-      {/* Search + Filters */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '0.75rem' }}>
         <input className="search-input" style={{ flex: '1 1 200px' }}
           placeholder="🔍 Search items, tags…"
@@ -567,7 +678,6 @@ function DashboardTab({ user, categories, onRefreshNotifs }) {
         <button className="btn" onClick={load} style={{ fontSize: '0.85rem' }}>🔄</button>
       </div>
 
-      {/* Top tag keywords */}
       {topTags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.75rem' }}>
           {topTags.map(({ tag }) => (
@@ -595,25 +705,24 @@ function DashboardTab({ user, categories, onRefreshNotifs }) {
           : <div style={GRID}>
               {items.map(item => (
                 <ItemCard key={item.id} item={item} currentUser={user}
-                  onClaim={setClaimTarget}
-                  onClose={handleClose}
+                  onInteract={setInteractTarget}
                   onEdit={setEditTarget}
                   onDelete={handleDelete} />
               ))}
             </div>
       }
 
-      <ClaimModal item={claimTarget} busy={claimBusy}
-        onConfirm={handleClaim} onCancel={() => setClaimTarget(null)} />
+      <InteractModal item={interactTarget} busy={interactBusy}
+        onConfirm={handleInteract} onCancel={() => setInteractTarget(null)} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Post Tab
+// Post Tab — unified single form (LOST or FOUND toggled in form)
 // ---------------------------------------------------------------------------
-function PostTab({ categories, defaultType, onPosted }) {
-  const [done,       setDone]       = useState(null);
+function PostTab({ categories, onPosted }) {
+  const [done,        setDone]        = useState(null);
   const [suggestions, setSuggestions] = useState([]);
 
   async function handleSave(data) {
@@ -650,13 +759,171 @@ function PostTab({ categories, defaultType, onPosted }) {
     );
   }
 
-  return <LFForm categories={categories} defaultType={defaultType} onSave={handleSave} />;
+  return <LFForm categories={categories} onSave={handleSave} />;
 }
 
 // ---------------------------------------------------------------------------
-// My Activity Tab
+// Pending Tab — items in PENDING state where current user is reporter or interactor
+// Reporter: sees [Received/Handed Over] + [Revert] + interactor's contact
+// Interactor: sees reporter's contact + waiting message
 // ---------------------------------------------------------------------------
-function MyActivityTab({ user, categories }) {
+function PendingTab({ onRefreshNotifs }) {
+  const [items,   setItems]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [msg,     setMsg]     = useState('');
+  const [busy,    setBusy]    = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setItems(await getPendingLFItems()); }
+    catch { setMsg('❌ Failed to load pending items.'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleResolve(id) {
+    if (!window.confirm('Confirm resolution? This marks the item as fully resolved.')) return;
+    setBusy(true);
+    try {
+      await resolveLFItem(id);
+      setMsg('✅ Marked as resolved and moved to History.');
+      onRefreshNotifs();
+      load();
+    } catch (err) {
+      setMsg('❌ ' + (err.response?.data?.detail || 'Error.'));
+    } finally { setBusy(false); }
+  }
+
+  async function handleRevert(id) {
+    if (!window.confirm('Revert this interaction? The item will return to the public board.')) return;
+    setBusy(true);
+    try {
+      await revertLFItem(id);
+      setMsg('✅ Reverted. The item is back on the board.');
+      onRefreshNotifs();
+      load();
+    } catch (err) {
+      setMsg('❌ ' + (err.response?.data?.detail || 'Error.'));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div>
+      {msg && (
+        <div style={{
+          padding: '0.65rem 1rem', borderRadius: 8, marginBottom: '1rem',
+          background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2',
+          color: msg.startsWith('✅') ? '#166534' : '#991b1b', fontSize: '0.875rem',
+        }}>{msg}</div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+          Items awaiting confirmation from the reporter.
+        </p>
+        <button className="btn" onClick={load} style={{ fontSize: '0.82rem' }}>🔄</button>
+      </div>
+
+      {loading
+        ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>
+        : items.length === 0
+          ? <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📭</div>
+              <p>No pending items. Interactions will appear here.</p>
+            </div>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {items.map(item => (
+                <PendingItemCard key={item.id} item={item}
+                  onResolve={handleResolve} onRevert={handleRevert} busy={busy} />
+              ))}
+            </div>
+      }
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// History Tab — RESOLVED items where user was involved (security sees all)
+// ---------------------------------------------------------------------------
+function HistoryTab() {
+  const [items,   setItems]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [msg,     setMsg]     = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setItems(await getHistoryLFItems()); }
+    catch { setMsg('❌ Failed to load history.'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      {msg && (
+        <div style={{
+          padding: '0.65rem 1rem', borderRadius: 8, marginBottom: '1rem',
+          background: '#fee2e2', color: '#991b1b', fontSize: '0.875rem',
+        }}>{msg}</div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+          Resolved items you were involved in.
+        </p>
+        <button className="btn" onClick={load} style={{ fontSize: '0.82rem' }}>🔄</button>
+      </div>
+
+      {loading
+        ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>
+        : items.length === 0
+          ? <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📜</div>
+              <p>No resolved items yet.</p>
+            </div>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {items.map(item => (
+                <div key={item.id} style={{
+                  ...CARD_STYLE,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: '0.75rem 1rem',
+                  gap: '0.85rem',
+                }}>
+                  <div style={{ width: 56, height: 56, flexShrink: 0, background: '#f3f4f6', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>
+                    {item.image_effective
+                      ? <img src={item.image_effective} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : item.category_icon || '📦'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{item.title}</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                      <span style={{
+                        background: item.item_type === 'LOST' ? '#fee2e2' : '#dcfce7',
+                        color: item.item_type === 'LOST' ? '#991b1b' : '#15803d',
+                        borderRadius: 4, padding: '0.1rem 0.35rem', fontSize: '0.68rem', fontWeight: 700, marginRight: 6,
+                      }}>{item.item_type}</span>
+                      📍 {item.location_name || '—'} · {timeAgo(item.date_reported)}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.55rem',
+                    borderRadius: 6, background: '#dcfce7', color: '#15803d', flexShrink: 0,
+                  }}>✅ RESOLVED</span>
+                </div>
+              ))}
+            </div>
+      }
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// My Activity Tab — all items posted by user (any status) + interactions
+// ---------------------------------------------------------------------------
+function MyActivityTab({ categories }) {
   const [myItems,    setMyItems]    = useState([]);
   const [claims,     setClaims]     = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -674,12 +941,6 @@ function MyActivityTab({ user, categories }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  async function handleClose(id) {
-    if (!window.confirm('Mark as resolved?')) return;
-    try { await closeLFItem(id); setMsg('✅ Marked as resolved.'); load(); }
-    catch (err) { setMsg('❌ ' + (err.response?.data?.detail || 'Error.')); }
-  }
 
   async function handleDelete(id) {
     if (!window.confirm('Delete this item?')) return;
@@ -705,6 +966,36 @@ function MyActivityTab({ user, categories }) {
     );
   }
 
+  // Status badge for my posts
+  function postStatusChip(s) {
+    const map = {
+      AVAILABLE: { bg: '#eff6ff', color: '#1d4ed8', label: 'Active' },
+      PENDING:   { bg: '#fef3c7', color: '#92400e', label: 'Pending' },
+      RESOLVED:  { bg: '#dcfce7', color: '#15803d', label: 'Resolved' },
+    };
+    const { bg, color, label } = map[s] || { bg: '#f3f4f6', color: '#374151', label: s };
+    return (
+      <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: 6, background: bg, color }}>
+        {label}
+      </span>
+    );
+  }
+
+  // Interaction status badge
+  function claimStatusChip(s) {
+    const map = {
+      PENDING:   { bg: '#fef3c7', color: '#92400e' },
+      RESOLVED:  { bg: '#dcfce7', color: '#15803d' },
+      CANCELLED: { bg: '#fee2e2', color: '#991b1b' },
+    };
+    const { bg, color } = map[s] || { bg: '#f3f4f6', color: '#374151' };
+    return (
+      <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: 6, background: bg, color }}>
+        {s}
+      </span>
+    );
+  }
+
   return (
     <div>
       {msg && (
@@ -716,7 +1007,7 @@ function MyActivityTab({ user, categories }) {
       )}
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        {[['items', `📦 My Posts (${myItems.length})`], ['claims', `🏷️ My Claims (${claims.length})`]].map(([v, l]) => (
+        {[['items', `📦 My Posts (${myItems.length})`], ['claims', `🏷️ My Interactions (${claims.length})`]].map(([v, l]) => (
           <button key={v} className={`tab-btn${view === v ? ' active' : ''}`}
             style={{ fontSize: '0.85rem' }} onClick={() => setView(v)}>{l}</button>
         ))}
@@ -728,21 +1019,46 @@ function MyActivityTab({ user, categories }) {
         : view === 'items'
           ? myItems.length === 0
             ? <p style={{ color: 'var(--text-secondary)' }}>You haven't posted any items yet.</p>
-            : <div style={GRID}>
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 {myItems.map(item => (
-                  <ItemCard key={item.id} item={item} currentUser={user}
-                    onClose={handleClose} onEdit={setEditTarget} onDelete={handleDelete} />
+                  <div key={item.id} style={{
+                    ...CARD_STYLE,
+                    flexDirection: 'row', alignItems: 'center',
+                    padding: '0.75rem 1rem', gap: '0.85rem',
+                  }}>
+                    <div style={{ width: 56, height: 56, flexShrink: 0, background: '#f3f4f6', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>
+                      {item.image_effective
+                        ? <img src={item.image_effective} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : item.category_icon || '📦'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{item.title}</div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                        📍 {item.location_name || '—'} · {timeAgo(item.date_reported)}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+                      {postStatusChip(item.status)}
+                      {item.status === 'AVAILABLE' && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn" style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                            onClick={() => setEditTarget(item)}>✏️</button>
+                          <button className="btn" style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
+                            onClick={() => handleDelete(item.id)}>🗑️</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
           : claims.length === 0
-            ? <p style={{ color: 'var(--text-secondary)' }}>You haven't claimed any items yet.</p>
+            ? <p style={{ color: 'var(--text-secondary)' }}>You haven't interacted with any items yet.</p>
             : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {claims.map(c => (
                   <div key={c.id} style={{
-                    background: 'var(--bg-card, #fff)',
-                    border: '1px solid var(--border, #e5e7eb)',
-                    borderRadius: 12, padding: '0.85rem 1rem',
-                    display: 'flex', gap: '0.9rem', alignItems: 'flex-start',
+                    ...CARD_STYLE,
+                    flexDirection: 'row', alignItems: 'flex-start',
+                    padding: '0.85rem 1rem', gap: '0.9rem',
                   }}>
                     {c.item_image && (
                       <img src={c.item_image} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
@@ -752,13 +1068,13 @@ function MyActivityTab({ user, categories }) {
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
                         📍 {c.item_location || '—'} · {c.item_type}
                       </div>
-                      {c.message && <div style={{ fontSize: '0.8rem', marginTop: 4, color: 'var(--text-secondary)', fontStyle: 'italic' }}>"{c.message}"</div>}
+                      {c.message && (
+                        <div style={{ fontSize: '0.8rem', marginTop: 4, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                          "{c.message}"
+                        </div>
+                      )}
                     </div>
-                    <span style={{
-                      fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: 6, flexShrink: 0,
-                      background: c.status === 'APPROVED' ? '#dcfce7' : c.status === 'REJECTED' ? '#fee2e2' : '#fef3c7',
-                      color:      c.status === 'APPROVED' ? '#15803d' : c.status === 'REJECTED' ? '#991b1b' : '#92400e',
-                    }}>{c.status}</span>
+                    {claimStatusChip(c.status)}
                   </div>
                 ))}
               </div>
@@ -790,8 +1106,9 @@ export default function LostFound() {
 
   const TABS = [
     { id: 'dashboard', label: '🔍 Browse' },
-    { id: 'lost',      label: '😟 Report Lost' },
-    { id: 'found',     label: '😊 Report Found' },
+    { id: 'post',      label: '📮 Report Item' },
+    { id: 'pending',   label: '⏳ Pending' },
+    { id: 'history',   label: '📜 History' },
     { id: 'activity',  label: '📋 My Activity' },
   ];
 
@@ -815,10 +1132,23 @@ export default function LostFound() {
         ))}
       </div>
 
-      {tab === 'dashboard' && <DashboardTab user={user} categories={categories} onRefreshNotifs={refreshNotifs} />}
-      {tab === 'lost'      && <PostTab categories={categories} defaultType="LOST"  onPosted={() => { refreshNotifs(); setTab('activity'); }} />}
-      {tab === 'found'     && <PostTab categories={categories} defaultType="FOUND" onPosted={() => { refreshNotifs(); setTab('activity'); }} />}
-      {tab === 'activity'  && <MyActivityTab user={user} categories={categories} />}
+      {tab === 'dashboard' && (
+        <DashboardTab
+          user={user}
+          categories={categories}
+          onRefreshNotifs={refreshNotifs}
+          onGoToPending={() => setTab('pending')}
+        />
+      )}
+      {tab === 'post'     && (
+        <PostTab
+          categories={categories}
+          onPosted={() => { refreshNotifs(); setTab('activity'); }}
+        />
+      )}
+      {tab === 'pending'  && <PendingTab onRefreshNotifs={refreshNotifs} />}
+      {tab === 'history'  && <HistoryTab />}
+      {tab === 'activity' && <MyActivityTab categories={categories} />}
     </section>
   );
 }

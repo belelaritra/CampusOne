@@ -13,7 +13,8 @@ class User(AbstractUser):
     full_name    = models.CharField(max_length=150, blank=True)
     phone_number = models.CharField(max_length=15,  blank=True)
     roll_number  = models.CharField(max_length=20,  blank=True)
-    points = models.PositiveIntegerField(default=0)
+    points      = models.PositiveIntegerField(default=0)
+    is_security = models.BooleanField(default=False)
 
     def __str__(self):
         return self.username
@@ -398,20 +399,18 @@ class LFItem(models.Model):
     TYPE_FOUND  = 'FOUND'
     TYPE_CHOICES = [('LOST', 'Lost'), ('FOUND', 'Found')]
 
-    STATUS_PENDING     = 'PENDING'
-    STATUS_CLAIMED     = 'CLAIMED'
-    STATUS_HANDED_OVER = 'HANDED_OVER'
-    STATUS_CLOSED      = 'CLOSED'
-    STATUS_CHOICES = [
-        ('PENDING',     'Pending'),
-        ('CLAIMED',     'Claimed'),
-        ('HANDED_OVER', 'Handed Over'),
-        ('CLOSED',      'Closed'),
+    STATUS_AVAILABLE = 'AVAILABLE'
+    STATUS_PENDING   = 'PENDING'
+    STATUS_RESOLVED  = 'RESOLVED'
+    STATUS_CHOICES   = [
+        ('AVAILABLE', 'Available'),
+        ('PENDING',   'Pending'),
+        ('RESOLVED',  'Resolved'),
     ]
 
     reporter      = models.ForeignKey(User, on_delete=models.CASCADE,  related_name='lf_items')
     item_type     = models.CharField(max_length=10, choices=TYPE_CHOICES, db_index=True)
-    status        = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+    status        = models.CharField(max_length=15, choices=STATUS_CHOICES, default='AVAILABLE', db_index=True)
     title         = models.CharField(max_length=200)
     description   = models.TextField(blank=True, default='')
     category      = models.ForeignKey(
@@ -445,13 +444,13 @@ class LFItem(models.Model):
 
 
 class LFClaim(models.Model):
-    STATUS_PENDING  = 'PENDING'
-    STATUS_APPROVED = 'APPROVED'
-    STATUS_REJECTED = 'REJECTED'
-    STATUS_CHOICES  = [
-        ('PENDING',  'Pending'),
-        ('APPROVED', 'Approved'),
-        ('REJECTED', 'Rejected'),
+    STATUS_PENDING   = 'PENDING'
+    STATUS_RESOLVED  = 'RESOLVED'
+    STATUS_CANCELLED = 'CANCELLED'
+    STATUS_CHOICES   = [
+        ('PENDING',   'Pending'),
+        ('RESOLVED',  'Resolved'),
+        ('CANCELLED', 'Cancelled'),
     ]
 
     item       = models.ForeignKey(LFItem, on_delete=models.CASCADE, related_name='claims')
@@ -461,8 +460,15 @@ class LFClaim(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = [('item', 'claimant')]
-        ordering        = ['-created_at']
+        # Only one PENDING interaction per item at any time (allows history of resolved/cancelled ones)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['item'],
+                condition=models.Q(status='PENDING'),
+                name='lf_unique_pending_per_item',
+            )
+        ]
+        ordering = ['-created_at']
 
     def __str__(self):
         return f"{self.claimant.username} → {self.item.title}"
