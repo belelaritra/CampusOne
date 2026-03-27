@@ -140,12 +140,17 @@ export const editLFItem = (id, data) => {
   return api.patch(`/lf/items/${id}/`, payload, cfg).then(r => r.data);
 };
 
-export const deleteLFItem     = (id)          => api.delete(`/lf/items/${id}/`).then(r => r.data);
-export const claimLFItem      = (id, message) => api.post(`/lf/items/${id}/claim/`, { message }).then(r => r.data);
-export const closeLFItem      = (id)          => api.post(`/lf/items/${id}/close/`).then(r => r.data);
-export const handoverLFItem   = (id)          => api.post(`/lf/items/${id}/handover/`).then(r => r.data);
+export const deleteLFItem      = (id)          => api.delete(`/lf/items/${id}/`).then(r => r.data);
+// interact = "Mark I have found" (LOST) / "Claim" (FOUND) — creates PENDING interaction
+export const interactLFItem   = (id, message) => api.post(`/lf/items/${id}/interact/`, { message }).then(r => r.data);
+// resolve = "Received" (LOST) / "Handed Over" (FOUND) — reporter confirms, marks RESOLVED
+export const resolveLFItem    = (id)          => api.post(`/lf/items/${id}/resolve/`).then(r => r.data);
+// revert = cancel pending interaction, item returns to AVAILABLE
+export const revertLFItem     = (id)          => api.post(`/lf/items/${id}/revert/`).then(r => r.data);
 export const getLFSuggestions = (id)          => api.get(`/lf/items/${id}/suggestions/`).then(r => r.data);
 export const getMyLFItems     = ()            => api.get('/lf/items/my_items/').then(r => r.data);
+export const getPendingLFItems = ()           => api.get('/lf/items/pending_items/').then(r => r.data);
+export const getHistoryLFItems = ()           => api.get('/lf/items/history_items/').then(r => r.data);
 export const getLFTopTags     = ()            => api.get('/lf/items/top_tags/').then(r => r.data);
 export const getMyClaims      = ()            => api.get('/lf/my-claims/').then(r => r.data);
 export const getLFCategories  = ()            => api.get('/lf/categories/').then(r => r.data);

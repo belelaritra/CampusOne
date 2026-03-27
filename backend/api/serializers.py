@@ -437,17 +437,20 @@ class LFCategorySerializer(serializers.ModelSerializer):
 
 
 class LFItemSerializer(serializers.ModelSerializer):
-    """Full read serializer — includes distance (annotated by view) and claim info."""
-    reporter_username = serializers.CharField(source='reporter.username',    read_only=True)
-    reporter_name     = serializers.CharField(source='reporter.full_name',   read_only=True)
-    reporter_roll     = serializers.CharField(source='reporter.roll_number', read_only=True)
-    reporter_phone    = serializers.SerializerMethodField()
-    category_name     = serializers.CharField(source='category.name', read_only=True, allow_null=True)
-    category_icon     = serializers.CharField(source='category.icon', read_only=True, allow_null=True)
-    image_effective   = serializers.SerializerMethodField()
-    claim_count       = serializers.SerializerMethodField()
-    user_has_claimed  = serializers.SerializerMethodField()
-    distance_meters   = serializers.SerializerMethodField()
+    """Full read serializer — includes distance (annotated by view), claim info and interaction details."""
+    reporter_username  = serializers.CharField(source='reporter.username',    read_only=True)
+    reporter_name      = serializers.CharField(source='reporter.full_name',   read_only=True)
+    reporter_roll      = serializers.CharField(source='reporter.roll_number', read_only=True)
+    reporter_phone     = serializers.SerializerMethodField()
+    category_name      = serializers.CharField(source='category.name', read_only=True, allow_null=True)
+    category_icon      = serializers.CharField(source='category.icon', read_only=True, allow_null=True)
+    image_effective    = serializers.SerializerMethodField()
+    claim_count        = serializers.SerializerMethodField()
+    user_has_claimed   = serializers.SerializerMethodField()
+    distance_meters    = serializers.SerializerMethodField()
+    active_interaction = serializers.SerializerMethodField()
+    is_reporter        = serializers.SerializerMethodField()
+    is_interactor      = serializers.SerializerMethodField()
 
     class Meta:
         model  = LFItem
@@ -459,18 +462,21 @@ class LFItemSerializer(serializers.ModelSerializer):
             'contact_type', 'roll_number',
             'reporter_username', 'reporter_name', 'reporter_roll', 'reporter_phone',
             'claim_count', 'user_has_claimed', 'distance_meters',
+            'active_interaction', 'is_reporter', 'is_interactor',
             'date_reported',
         ]
 
     def get_reporter_phone(self, obj):
-        """Visible only to the reporter themselves or anyone who has claimed the item."""
+        """Visible only to the reporter themselves or the active interactor on a PENDING item."""
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
         u = request.user
         if obj.reporter_id == u.id:
             return obj.reporter.phone_number or obj.reporter.phone or None
-        if obj.claims.filter(claimant_id=u.id).exists():
+        # Show to the current active interactor
+        ai = getattr(obj, '_active_interaction', None)
+        if ai is not None and getattr(ai, 'claimant_id', None) == u.id:
             return obj.reporter.phone_number or obj.reporter.phone or None
         return None
 
@@ -485,13 +491,66 @@ class LFItemSerializer(serializers.ModelSerializer):
         return getattr(obj, '_claim_count', obj.claims.count())
 
     def get_user_has_claimed(self, obj):
-        request = self.context.get('request')
-        if not request or not request.user.is_authenticated:
-            return False
-        return getattr(obj, '_user_has_claimed', None)
+        """True if the current user is the active PENDING interactor on this item."""
+        return getattr(obj, '_user_has_claimed', False)
 
     def get_distance_meters(self, obj):
         return getattr(obj, '_distance', None)
+
+    def get_is_reporter(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.reporter_id == request.user.id
+
+    def get_is_interactor(self, obj):
+        return getattr(obj, '_user_has_claimed', False)
+
+    def get_active_interaction(self, obj):
+        """
+        Returns interaction contact details for involved parties when item is PENDING.
+        Reporter sees interactor's contact; interactor sees reporter's contact.
+        Security sees both. Others see nothing.
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.status != 'PENDING':
+            return None
+
+        interaction = getattr(obj, '_active_interaction', None)
+        if interaction is None:
+            return None
+
+        u = request.user
+        is_reporter   = obj.reporter_id == u.id
+        is_interactor = getattr(interaction, 'claimant_id', None) == u.id
+        is_security   = getattr(u, 'is_security', False) or u.is_staff
+
+        if not (is_reporter or is_interactor or is_security):
+            return None
+
+        data = {
+            'id':                 interaction.id,
+            'interactor_name':    interaction.claimant.full_name or interaction.claimant.username,
+            'interactor_username': interaction.claimant.username,
+            'interactor_phone':   None,
+            'reporter_name':      obj.reporter.full_name or obj.reporter.username,
+            'reporter_phone':     None,
+            'message':            interaction.message,
+            'created_at':         interaction.created_at,
+        }
+
+        if is_reporter or is_security:
+            data['interactor_phone'] = (
+                interaction.claimant.phone_number or interaction.claimant.phone or None
+            )
+        if is_interactor or is_security:
+            data['reporter_phone'] = (
+                obj.reporter.phone_number or obj.reporter.phone or None
+            )
+
+        return data
 
 
 class LFItemCreateSerializer(serializers.ModelSerializer):
@@ -534,10 +593,12 @@ class LFClaimSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'status', 'created_at']
 
     def get_claimant_phone(self, obj):
-        # Visible to the item reporter in the claims list
+        # Visible to the item reporter or the claimant themselves
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            if obj.item.reporter_id == request.user.id or obj.claimant_id == request.user.id:
+            u = request.user
+            is_security = getattr(u, 'is_security', False) or u.is_staff
+            if obj.item.reporter_id == u.id or obj.claimant_id == u.id or is_security:
                 return obj.claimant.phone_number or obj.claimant.phone or None
         return None
 

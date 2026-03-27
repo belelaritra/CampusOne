@@ -1,5 +1,5 @@
 import math
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import F, Q, Count, Sum, Avg
 from django.db.models.functions import ExtractHour
 from django.utils import timezone
@@ -1165,7 +1165,7 @@ def _annotate_distance(items, user_lat, user_lng):
 
 
 def _annotate_claims(items, user_id):
-    """Attach _claim_count and _user_has_claimed to each item avoiding N+1."""
+    """Attach _claim_count, _user_has_claimed, and _active_interaction to each item (no N+1)."""
     if not items:
         return
     ids = [i.pk for i in items]
@@ -1173,13 +1173,18 @@ def _annotate_claims(items, user_id):
         LFClaim.objects.filter(item_id__in=ids)
         .values('item_id').annotate(n=Count('id')).values_list('item_id', 'n')
     )
-    user_claims = set(
-        LFClaim.objects.filter(item_id__in=ids, claimant_id=user_id)
-        .values_list('item_id', flat=True)
+    # Active pending interactions (at most one per item by DB constraint)
+    active_qs = (
+        LFClaim.objects.filter(item_id__in=ids, status='PENDING')
+        .select_related('claimant')
     )
+    active_map = {c.item_id: c for c in active_qs}
     for item in items:
         item._claim_count = counts.get(item.pk, 0)
-        item._user_has_claimed = item.pk in user_claims
+        ai = active_map.get(item.pk)
+        item._active_interaction = ai
+        # _user_has_claimed means "current user is the active pending interactor"
+        item._user_has_claimed = ai is not None and ai.claimant_id == user_id
 
 
 def _bulk_notify_found(found_item, reporter):
@@ -1189,7 +1194,7 @@ def _bulk_notify_found(found_item, reporter):
 
     lost_qs = (
         LFItem.objects
-        .filter(item_type=LFItem.TYPE_LOST, status=LFItem.STATUS_PENDING)
+        .filter(item_type=LFItem.TYPE_LOST, status=LFItem.STATUS_AVAILABLE)
         .exclude(reporter=reporter)
         .select_related('reporter')
     )
@@ -1236,11 +1241,11 @@ class LFItemViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     # ------------------------------------------------------------------
-    # GET /api/lf/items/?type=&status=PENDING&category=&q=&tags=&lat=&lng=
+    # GET /api/lf/items/?type=&status=AVAILABLE&category=&q=&tags=&lat=&lng=
     # ------------------------------------------------------------------
     def list(self, request):
         item_type  = request.query_params.get('type', '')
-        status_f   = request.query_params.get('status', 'PENDING')
+        status_f   = request.query_params.get('status', 'AVAILABLE')
         category   = request.query_params.get('category', '')
         q          = request.query_params.get('q', '').strip().lower()
         tags_param = request.query_params.get('tags', '')
@@ -1320,8 +1325,8 @@ class LFItemViewSet(viewsets.ViewSet):
 
         if item.reporter_id != request.user.id:
             return Response({'detail': 'Only the reporter can edit this.'}, status=403)
-        if item.status != LFItem.STATUS_PENDING:
-            return Response({'detail': 'Only PENDING items can be edited.'}, status=400)
+        if item.status != LFItem.STATUS_AVAILABLE:
+            return Response({'detail': 'Only AVAILABLE items can be edited.'}, status=400)
 
         serializer = LFItemCreateSerializer(item, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -1342,92 +1347,206 @@ class LFItemViewSet(viewsets.ViewSet):
             return Response({'detail': 'Not found.'}, status=404)
         if item.reporter_id != request.user.id:
             return Response({'detail': 'Only the reporter can delete this.'}, status=403)
-        if item.status != LFItem.STATUS_PENDING:
-            return Response({'detail': 'Only PENDING items can be deleted.'}, status=400)
+        if item.status != LFItem.STATUS_AVAILABLE:
+            return Response({'detail': 'Only AVAILABLE items can be deleted.'}, status=400)
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ------------------------------------------------------------------
-    # POST /api/lf/items/{id}/claim/
+    # POST /api/lf/items/{id}/interact/
+    # "Mark I have found" (for LOST) / "Claim" (for FOUND)
+    # Creates a PENDING interaction; moves item to PENDING state.
+    # Concurrency-safe via select_for_update + DB UniqueConstraint.
     # ------------------------------------------------------------------
     @action(detail=True, methods=['post'])
-    def claim(self, request, pk=None):
+    def interact(self, request, pk=None):
         try:
             item = LFItem.objects.select_related('reporter').get(pk=pk)
         except LFItem.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=404)
 
         if item.reporter_id == request.user.id:
-            return Response({'detail': 'You cannot claim your own item.'}, status=400)
-        if item.status not in (LFItem.STATUS_PENDING, LFItem.STATUS_CLAIMED):
-            return Response({'detail': 'This item is no longer available.'}, status=400)
+            return Response({'detail': 'You cannot interact with your own item.'}, status=400)
+        if item.status != LFItem.STATUS_AVAILABLE:
+            return Response({'detail': 'This item is not available.'}, status=400)
 
         message = (request.data.get('message') or '').strip()
 
         with transaction.atomic():
-            claim, created = LFClaim.objects.get_or_create(
-                item=item, claimant=request.user,
-                defaults={'message': message},
-            )
-            if not created:
-                return Response({'detail': 'You have already claimed this item.'}, status=409)
+            # Re-fetch with row lock to prevent race conditions
+            item = LFItem.objects.select_for_update().select_related('reporter').get(pk=pk)
+            if item.status != LFItem.STATUS_AVAILABLE:
+                return Response({'detail': 'This item is no longer available.'}, status=409)
 
-            # Update item status to CLAIMED
-            LFItem.objects.filter(pk=item.pk).update(status=LFItem.STATUS_CLAIMED)
-            item.status = LFItem.STATUS_CLAIMED
+            try:
+                LFClaim.objects.create(
+                    item=item, claimant=request.user, message=message, status='PENDING',
+                )
+            except IntegrityError:
+                return Response(
+                    {'detail': 'Another interaction is already pending for this item.'}, status=409
+                )
 
+            LFItem.objects.filter(pk=item.pk).update(status=LFItem.STATUS_PENDING)
+            item.status = LFItem.STATUS_PENDING
+
+            verb = 'found' if item.item_type == LFItem.TYPE_LOST else 'claimed'
             LFNotification.objects.create(
                 user=item.reporter, item=item,
                 message=(
                     f"{request.user.full_name or request.user.username} "
-                    f"has claimed your {item.item_type.lower()} item: \"{item.title}\""
+                    f"has {verb} your {item.item_type.lower()} item: \"{item.title}\""
                 ),
             )
-            LFLog.objects.create(item=item, actor=request.user, action='CLAIMED', detail=message)
+            LFLog.objects.create(item=item, actor=request.user, action='INTERACTED', detail=message)
 
         _annotate_claims([item], request.user.id)
         return Response(LFItemSerializer(item, context={'request': request}).data, status=201)
 
     # ------------------------------------------------------------------
-    # POST /api/lf/items/{id}/close/
+    # POST /api/lf/items/{id}/resolve/
+    # "Received" (LOST) / "Handed Over" (FOUND) — reporter or security confirms.
+    # Marks item RESOLVED.
     # ------------------------------------------------------------------
     @action(detail=True, methods=['post'])
-    def close(self, request, pk=None):
+    def resolve(self, request, pk=None):
         try:
-            item = LFItem.objects.get(pk=pk)
+            item = LFItem.objects.select_related('reporter').get(pk=pk)
         except LFItem.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=404)
-        if item.reporter_id != request.user.id:
-            return Response({'detail': 'Only the reporter can close this item.'}, status=403)
+
+        if item.status != LFItem.STATUS_PENDING:
+            return Response({'detail': 'Item is not in pending state.'}, status=400)
+
+        is_security = getattr(request.user, 'is_security', False) or request.user.is_staff
+        if item.contact_type == 'SECURITY':
+            if not is_security:
+                return Response({'detail': 'Only security staff can resolve this item.'}, status=403)
+        else:
+            if item.reporter_id != request.user.id and not is_security:
+                return Response({'detail': 'Only the reporter can resolve this item.'}, status=403)
+
         with transaction.atomic():
-            item.status = LFItem.STATUS_CLOSED
-            item.save(update_fields=['status'])
-            LFLog.objects.create(item=item, actor=request.user, action='CLOSED')
+            updated = LFClaim.objects.filter(item=item, status='PENDING').update(status='RESOLVED')
+            LFItem.objects.filter(pk=item.pk).update(status=LFItem.STATUS_RESOLVED)
+            item.status = LFItem.STATUS_RESOLVED
+
+            # Notify interactor
+            resolved_claim = (
+                LFClaim.objects.filter(item=item, status='RESOLVED')
+                .select_related('claimant')
+                .order_by('-created_at').first()
+            )
+            if resolved_claim:
+                LFNotification.objects.create(
+                    user=resolved_claim.claimant, item=item,
+                    message=(
+                        f"Your {'report' if item.item_type == LFItem.TYPE_LOST else 'claim'} "
+                        f"for \"{item.title}\" has been marked as resolved."
+                    ),
+                )
+            LFLog.objects.create(item=item, actor=request.user, action='RESOLVED')
+
         _annotate_claims([item], request.user.id)
         return Response(LFItemSerializer(item, context={'request': request}).data)
 
     # ------------------------------------------------------------------
-    # POST /api/lf/items/{id}/handover/  (security staff only)
+    # POST /api/lf/items/{id}/revert/
+    # Reporter cancels pending interaction; item returns to AVAILABLE.
     # ------------------------------------------------------------------
     @action(detail=True, methods=['post'])
-    def handover(self, request, pk=None):
-        if not request.user.is_staff:
-            return Response({'detail': 'Security staff only.'}, status=403)
+    def revert(self, request, pk=None):
         try:
-            item = LFItem.objects.get(pk=pk)
+            item = LFItem.objects.select_related('reporter').get(pk=pk)
         except LFItem.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=404)
+
+        if item.status != LFItem.STATUS_PENDING:
+            return Response({'detail': 'Item is not in pending state.'}, status=400)
+
+        is_security = getattr(request.user, 'is_security', False) or request.user.is_staff
+        if item.reporter_id != request.user.id and not is_security:
+            return Response({'detail': 'Only the reporter can revert this item.'}, status=403)
+
         with transaction.atomic():
-            item.status = LFItem.STATUS_HANDED_OVER
-            item.save(update_fields=['status'])
-            LFLog.objects.create(item=item, actor=request.user, action='HANDED_OVER')
-            # Notify reporter
-            LFNotification.objects.create(
-                user=item.reporter, item=item,
-                message=f"Your item \"{item.title}\" has been marked as handed over by security.",
+            cancelled = (
+                LFClaim.objects.filter(item=item, status='PENDING')
+                .select_related('claimant')
+                .first()
             )
+            LFClaim.objects.filter(item=item, status='PENDING').update(status='CANCELLED')
+            LFItem.objects.filter(pk=item.pk).update(status=LFItem.STATUS_AVAILABLE)
+            item.status = LFItem.STATUS_AVAILABLE
+
+            if cancelled:
+                LFNotification.objects.create(
+                    user=cancelled.claimant, item=item,
+                    message=(
+                        f"The pending interaction for \"{item.title}\" has been cancelled. "
+                        f"The item is back on the board."
+                    ),
+                )
+            LFLog.objects.create(item=item, actor=request.user, action='REVERTED')
+
         _annotate_claims([item], request.user.id)
         return Response(LFItemSerializer(item, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/pending_items/
+    # Items in PENDING state where current user is reporter OR interactor.
+    # Security sees all PENDING items.
+    # ------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def pending_items(self, request):
+        user = request.user
+        is_security = getattr(user, 'is_security', False) or user.is_staff
+
+        if is_security:
+            items = list(
+                LFItem.objects.filter(status=LFItem.STATUS_PENDING)
+                .select_related('reporter', 'category')
+            )
+        else:
+            interacted_ids = LFClaim.objects.filter(
+                claimant=user, status='PENDING',
+            ).values_list('item_id', flat=True)
+            items = list(
+                LFItem.objects.filter(
+                    Q(reporter=user) | Q(id__in=interacted_ids),
+                    status=LFItem.STATUS_PENDING,
+                ).select_related('reporter', 'category')
+            )
+
+        _annotate_claims(items, user.id)
+        return Response(LFItemSerializer(items, many=True, context={'request': request}).data)
+
+    # ------------------------------------------------------------------
+    # GET /api/lf/items/history_items/
+    # RESOLVED items where user was involved. Security sees all.
+    # ------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def history_items(self, request):
+        user = request.user
+        is_security = getattr(user, 'is_security', False) or user.is_staff
+
+        if is_security:
+            items = list(
+                LFItem.objects.filter(status=LFItem.STATUS_RESOLVED)
+                .select_related('reporter', 'category')
+            )
+        else:
+            interacted_ids = LFClaim.objects.filter(
+                claimant=user,
+            ).values_list('item_id', flat=True)
+            items = list(
+                LFItem.objects.filter(
+                    Q(reporter=user) | Q(id__in=interacted_ids),
+                    status=LFItem.STATUS_RESOLVED,
+                ).select_related('reporter', 'category')
+            )
+
+        _annotate_claims(items, user.id)
+        return Response(LFItemSerializer(items, many=True, context={'request': request}).data)
 
     # ------------------------------------------------------------------
     # GET /api/lf/items/{id}/suggestions/
@@ -1441,14 +1560,14 @@ class LFItemViewSet(viewsets.ViewSet):
 
         opposite   = LFItem.TYPE_FOUND if item.item_type == LFItem.TYPE_LOST else LFItem.TYPE_LOST
         candidates = list(
-            LFItem.objects.filter(item_type=opposite, status=LFItem.STATUS_PENDING)
+            LFItem.objects.filter(item_type=opposite, status=LFItem.STATUS_AVAILABLE)
             .select_related('reporter', 'category')
             .exclude(pk=pk)
         )
         ref_tags  = set(t.lower() for t in (item.tags or []))
         ref_words = set(item.title.lower().split())
         scored = sorted(
-            ((  _lf_suggestion_score(c, ref_tags, ref_words, item.category_id), c)
+            ((_lf_suggestion_score(c, ref_tags, ref_words, item.category_id), c)
              for c in candidates),
             key=lambda x: x[0], reverse=True,
         )
@@ -1463,7 +1582,7 @@ class LFItemViewSet(viewsets.ViewSet):
     def my_items(self, request):
         items = list(
             LFItem.objects.filter(reporter=request.user)
-            .select_related('category')
+            .select_related('reporter', 'category')
         )
         _annotate_claims(items, request.user.id)
         return Response(LFItemSerializer(items, many=True, context={'request': request}).data)
@@ -1473,7 +1592,7 @@ class LFItemViewSet(viewsets.ViewSet):
     # ------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def top_tags(self, request):
-        rows = LFItem.objects.filter(status='PENDING').values_list('tags', flat=True)
+        rows = LFItem.objects.filter(status=LFItem.STATUS_AVAILABLE).values_list('tags', flat=True)
         counter = {}
         for tag_list in rows:
             for tag in (tag_list or []):
@@ -1523,7 +1642,7 @@ class LFCategoryListView(APIView):
         cats = list(LFCategory.objects.all())
         # Annotate item_count without hitting DB per category
         counts = dict(
-            LFItem.objects.filter(status='PENDING')
+            LFItem.objects.filter(status=LFItem.STATUS_AVAILABLE)
             .values('category_id').annotate(n=Count('id')).values_list('category_id', 'n')
         )
         for c in cats:
