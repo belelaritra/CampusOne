@@ -8,8 +8,84 @@ import {
   getMyLFItems, getPendingLFItems, getHistoryLFItems,
   getMyClaims, getLFTopTags, getLFCategories,
   getLFNotifications, markAllLFNotifsRead,
-  getLFTopLostLocations,
+  getLFTopLostLocations, getLFTopLostCategories,
 } from '../services/api';
+
+// ---------------------------------------------------------------------------
+// Predefined IITB campus locations (no free-text allowed)
+// ---------------------------------------------------------------------------
+const LF_LOCATIONS = [
+  { group: 'Academic & Common', items: [
+    { value: 'main_gate',     label: 'Main Gate' },
+    { value: 'main_building', label: 'Main Building' },
+    { value: 'central_lib',   label: 'Central Library' },
+    { value: 'lecture_hall',  label: 'Lecture Hall Complex' },
+    { value: 'conv_hall',     label: 'Convocation Hall' },
+    { value: 'kresit',        label: 'KReSIT' },
+    { value: 'sjmsom',        label: 'SJMSOM' },
+    { value: 'sac',           label: 'Students Activity Centre' },
+    { value: 'gymkhana',      label: 'Students Gymkhana' },
+    { value: 'gulmohar',      label: 'Gulmohar' },
+    { value: 'shree_balaji',  label: 'Shree Balaji Fruit & Vegetable' },
+  ]},
+  { group: 'Hostels', items: [
+    { value: 'hostel_1',    label: 'Hostel 1' },  { value: 'hostel_2',    label: 'Hostel 2' },
+    { value: 'hostel_3',    label: 'Hostel 3' },  { value: 'hostel_4',    label: 'Hostel 4' },
+    { value: 'hostel_5',    label: 'Hostel 5' },  { value: 'hostel_6',    label: 'Hostel 6' },
+    { value: 'hostel_7',    label: 'Hostel 7' },  { value: 'hostel_8',    label: 'Hostel 8' },
+    { value: 'hostel_9',    label: 'Hostel 9' },  { value: 'hostel_10',   label: 'Hostel 10' },
+    { value: 'hostel_11',   label: 'Hostel 11' }, { value: 'hostel_12',   label: 'Hostel 12' },
+    { value: 'hostel_13',   label: 'Hostel 13' }, { value: 'hostel_14',   label: 'Hostel 14' },
+    { value: 'hostel_15',   label: 'Hostel 15' }, { value: 'hostel_16',   label: 'Hostel 16' },
+    { value: 'hostel_17',   label: 'Hostel 17' }, { value: 'hostel_18',   label: 'Hostel 18' },
+    { value: 'hostel_19',   label: 'Hostel 19' }, { value: 'hostel_21',   label: 'Hostel 21' },
+    { value: 'tansa_house', label: 'Tansa House' },
+  ]},
+];
+
+// Flat label map for display purposes
+const LF_LOCATION_LABEL = Object.fromEntries(
+  LF_LOCATIONS.flatMap(g => g.items.map(i => [i.value, i.label]))
+);
+
+// Coordinates for client-side GPS → nearest location resolution
+const LF_LOCATION_COORDS = {
+  main_gate:     [19.12845641460189, 72.91926132752846],
+  gulmohar:      [19.129814529274448, 72.91533444403758],
+  shree_balaji:  [19.135117507090506, 72.90574766165889],
+  central_lib:   [19.13332, 72.91318], lecture_hall:  [19.13260, 72.91182],
+  kresit:        [19.13400, 72.91090], sac:           [19.13100, 72.91550],
+  gymkhana:      [19.13050, 72.91500], main_building: [19.13360, 72.91270],
+  conv_hall:     [19.13220, 72.91050], sjmsom:        [19.13520, 72.90980],
+  hostel_1:  [19.13046, 72.91560], hostel_2:  [19.13012, 72.91520],
+  hostel_3:  [19.12988, 72.91490], hostel_4:  [19.12960, 72.91460],
+  hostel_5:  [19.12940, 72.91420], hostel_6:  [19.12910, 72.91380],
+  hostel_7:  [19.12880, 72.91350], hostel_8:  [19.12850, 72.91310],
+  hostel_9:  [19.12820, 72.91280], hostel_10: [19.12790, 72.91250],
+  hostel_11: [19.13200, 72.91650], hostel_12: [19.13180, 72.91680],
+  hostel_13: [19.13250, 72.91700], hostel_14: [19.13270, 72.91720],
+  hostel_15: [19.13290, 72.91740], hostel_16: [19.13310, 72.91760],
+  hostel_17: [19.13330, 72.91780], hostel_18: [19.13350, 72.91800],
+  hostel_19: [19.13370, 72.91820], hostel_21: [19.13390, 72.91840],
+  tansa_house: [19.13420, 72.91860],
+};
+
+function gpsHaversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+  const dp = (lat2 - lat1) * Math.PI / 180, dl = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function nearestLFLocation(lat, lng) {
+  let bestKey = '', bestDist = Infinity;
+  for (const [key, [plat, plng]] of Object.entries(LF_LOCATION_COORDS)) {
+    const d = gpsHaversine(lat, lng, plat, plng);
+    if (d < bestDist) { bestDist = d; bestKey = key; }
+  }
+  return bestKey;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,6 +103,11 @@ function timeAgo(iso) {
 function fmtDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function fmtDistance(m) {
+  if (m == null) return null;
+  return m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`;
 }
 
 function whatsappLink(phone) {
@@ -233,7 +314,7 @@ function ItemCard({ item, currentUser, onInteract, onEdit, onDelete, compact = f
 
         {/* Distance */}
         {item.distance_meters != null && (
-          <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>🗺️ {item.distance_meters}m</div>
+          <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>🗺️ {fmtDistance(item.distance_meters)}</div>
         )}
 
         {/* Action buttons */}
@@ -267,46 +348,98 @@ function ItemCard({ item, currentUser, onInteract, onEdit, onDelete, compact = f
 }
 
 // ---------------------------------------------------------------------------
-// Pending Item Card — horizontal row with contact + action buttons
+// Pending Item Card — square card with all info + role-based action buttons
 // ---------------------------------------------------------------------------
 function PendingItemCard({ item, onResolve, onRevert, busy }) {
   const isLost       = item.item_type === 'LOST';
   const isReporter   = item.is_reporter;
   const isInteractor = item.is_interactor;
   const interaction  = item.active_interaction;
+  const canResolve   = item.can_resolve;   // from backend — mirrors resolve() permission
+  const canRevert    = item.can_revert;    // from backend — mirrors revert() permission
+  const bySecOffice  = item.contact_type === 'SECURITY';
 
   const mapsUrl = item.latitude && item.longitude
     ? `https://www.google.com/maps?q=${item.latitude},${item.longitude}` : null;
 
   return (
-    <div style={{ ...ROW_CARD, minHeight: 110 }}>
-      {/* Thumbnail */}
-      <div style={{ width: 90, flexShrink: 0, background: '#f3f4f6', position: 'relative' }}>
+    <div style={CARD_BASE}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = CARD_BASE.boxShadow; }}
+    >
+      {/* Image — 4:3 aspect */}
+      <div style={{ width: '100%', aspectRatio: '4/3', background: '#f3f4f6', position: 'relative', flexShrink: 0, overflow: 'hidden' }}>
         {item.image_effective
           ? <img src={item.image_effective} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.2rem' }}>
               {item.category_icon || '📦'}
             </div>
         }
-        <span style={{ position: 'absolute', bottom: 4, left: 4, ...typeBadge(item.item_type) }}>{item.item_type}</span>
+        {/* LOST/FOUND badge */}
+        <span style={{ position: 'absolute', top: 7, left: 7, ...typeBadge(item.item_type) }}>
+          {item.item_type}
+        </span>
+        {/* Security badge */}
+        {bySecOffice && (
+          <span style={{
+            position: 'absolute', top: 7, right: 7,
+            background: '#fef3c7', color: '#92400e', borderRadius: 5,
+            fontSize: '0.6rem', fontWeight: 700, padding: '0.15rem 0.4rem',
+          }}>
+            🏢 Security
+          </span>
+        )}
+        {/* PENDING status */}
+        <span style={{
+          position: 'absolute', bottom: 7, right: 7,
+          background: '#fef3c7', color: '#92400e', borderRadius: 5,
+          fontSize: '0.6rem', fontWeight: 700, padding: '0.15rem 0.4rem',
+        }}>
+          ⏳ PENDING
+        </span>
       </div>
 
-      {/* Content */}
-      <div style={{ padding: '0.7rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
-        <strong style={{ fontSize: '0.9rem' }}>{item.title}</strong>
-        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-          📍 {mapsUrl
-            ? <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{item.location_name || 'View map'}</a>
-            : (item.location_name || '—')}
-          {' · '}🕐 {timeAgo(item.date_reported)}
+      {/* Card body */}
+      <div style={{ padding: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.28rem', flex: 1 }}>
+        <strong style={{ fontSize: '0.88rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          {item.title}
+        </strong>
+
+        {/* Category */}
+        {item.category_name && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
+            <span style={{ fontSize: '0.67rem', background: '#f3f4f6', borderRadius: 4, padding: '0.12rem 0.35rem', color: '#374151' }}>
+              {item.category_icon} {item.category_name}
+            </span>
+          </div>
+        )}
+
+        {/* Location + distance */}
+        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+          <span>📍</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {mapsUrl
+              ? <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{item.location_name || 'View map'}</a>
+              : (item.location_name || '—')}
+          </span>
+          {item.distance_meters != null && (
+            <span style={{ flexShrink: 0, color: '#6b7280' }}>· 🗺️ {fmtDistance(item.distance_meters)}</span>
+          )}
         </div>
 
+        {/* Date + reporter */}
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+          🕐 {timeAgo(item.date_reported)} · {isLost ? '😟' : '😊'} {item.reporter_name || item.reporter_username}
+        </div>
+
+        {/* Interaction message */}
         {interaction?.message && (
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             💬 "{interaction.message}"
           </div>
         )}
 
+        {/* Contact chips */}
         {isReporter && interaction && (
           <ContactChip name={interaction.interactor_name} phone={interaction.interactor_phone} />
         )}
@@ -314,32 +447,28 @@ function PendingItemCard({ item, onResolve, onRevert, busy }) {
           <ContactChip name={interaction.reporter_name} phone={interaction.reporter_phone} />
         )}
 
-        {item.contact_type === 'SECURITY' && (
-          <div style={{ background: '#fef3c7', borderRadius: 6, padding: '0.3rem 0.55rem', fontSize: '0.76rem' }}>
-            🏢 Handled by <strong>Security Office</strong>
-          </div>
-        )}
-
-        {isReporter && (
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: 4 }}>
+        {/* Action buttons — shown based on can_resolve / can_revert from backend */}
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: 'auto', paddingTop: '0.3rem' }}>
+          {canResolve && (
             <button className="btn btn-primary" disabled={busy}
-              style={{ fontSize: '0.76rem', padding: '0.28rem 0.7rem' }}
+              style={{ fontSize: '0.74rem', padding: '0.26rem 0.65rem', flex: 1 }}
               onClick={() => onResolve && onResolve(item.id)}>
               {isLost ? '✅ Received' : '✅ Handed Over'}
             </button>
+          )}
+          {canRevert && (
             <button className="btn" disabled={busy}
-              style={{ fontSize: '0.76rem', padding: '0.28rem 0.6rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
+              style={{ fontSize: '0.74rem', padding: '0.26rem 0.55rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
               onClick={() => onRevert && onRevert(item.id)}>
               ↩️ Revert
             </button>
-          </div>
-        )}
-
-        {isInteractor && (
-          <div style={{ fontSize: '0.76rem', color: '#92400e', fontWeight: 500 }}>
-            ⏳ Waiting for confirmation from the reporter
-          </div>
-        )}
+          )}
+          {isInteractor && !canResolve && !canRevert && (
+            <span style={{ fontSize: '0.72rem', color: '#92400e', fontWeight: 500, paddingTop: '0.2rem' }}>
+              ⏳ Awaiting reporter confirmation
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -398,16 +527,25 @@ function InteractModal({ item, onConfirm, onCancel, busy }) {
 const EMPTY_FORM = {
   item_type: 'LOST', title: '', description: '',
   category: '', tags: '', image: null, image_url: '',
-  location_name: '', latitude: '', longitude: '',
-  contact_type: 'ME', roll_number: '',
+  location_name: '', latitude: null, longitude: null,
+  collect_from: 'ME', id_card_number: '',
 };
 
 function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
-  const [form, setForm]       = useState({ ...EMPTY_FORM, ...initial });
-  const [preview, setPreview] = useState(initial?.image_effective || null);
-  const [error, setError]     = useState('');
-  const [busy, setBusy]       = useState(false);
-  const fileRef               = useRef();
+  // Normalize initial: map read-serializer field names (contact_type/roll_number) → form names
+  const [form, setForm] = useState({
+    ...EMPTY_FORM,
+    ...initial,
+    collect_from:   initial?.contact_type   || 'ME',
+    id_card_number: initial?.roll_number    || '',
+    // If existing location_name is not in our predefined list, reset to empty
+    location_name: LF_LOCATION_LABEL[initial?.location_name] ? (initial?.location_name || '') : '',
+  });
+  const [preview, setPreview]   = useState(initial?.image_effective || null);
+  const [error, setError]       = useState('');
+  const [busy, setBusy]         = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const fileRef = useRef();
 
   const handle = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
 
@@ -416,37 +554,51 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
     if (f) { setForm(p => ({ ...p, image: f })); setPreview(URL.createObjectURL(f)); }
   }
 
-  function useGPS() {
+  function handleGPS() {
     if (!navigator.geolocation) return alert('Geolocation not supported.');
+    setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
-      p => setForm(pr => ({ ...pr, latitude: p.coords.latitude, longitude: p.coords.longitude })),
-      () => alert('Could not get location.'),
+      pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const nearest = nearestLFLocation(lat, lng);
+        setForm(p => ({ ...p, latitude: lat, longitude: lng, location_name: nearest }));
+        setGpsLoading(false);
+      },
+      () => { alert('Could not get location. Please select manually.'); setGpsLoading(false); },
       { enableHighAccuracy: true, timeout: 8000 },
     );
   }
+
+  const isFound = form.item_type === 'FOUND';
+  const selectedCat = categories.find(c => c.id === Number(form.category));
+  const isIDCat = isFound && selectedCat?.name?.toLowerCase().includes('id');
 
   async function submit(e) {
     e.preventDefault();
     setError('');
     if (!form.title.trim()) return setError('Item name is required.');
+    if (!form.location_name) return setError('Please select a location or use GPS.');
+    if (isIDCat && !form.id_card_number.trim()) return setError('Roll number on ID card is required.');
     setBusy(true);
     try {
       const tagsList = form.tags
         ? form.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
         : [];
       const payload = {
-        item_type: form.item_type, title: form.title.trim(),
-        description: form.description.trim(),
-        category: form.category || undefined,
-        tags: tagsList,
-        location_name: form.location_name.trim(),
-        contact_type: form.contact_type,
-        roll_number: form.roll_number.trim(),
+        item_type:      form.item_type,
+        title:          form.title.trim(),
+        description:    form.description.trim(),
+        category:       form.category || undefined,
+        tags:           tagsList,
+        location_name:  form.location_name,
+        collect_from:   isFound ? form.collect_from : 'ME',
+        id_card_number: isIDCat ? form.id_card_number.trim() : '',
       };
-      if (form.latitude)  payload.latitude  = parseFloat(form.latitude);
-      if (form.longitude) payload.longitude = parseFloat(form.longitude);
+      if (form.latitude  != null) payload.latitude  = form.latitude;
+      if (form.longitude != null) payload.longitude = form.longitude;
       if (form.image instanceof File) payload.image = form.image;
-      else if (form.image_url) payload.image_url = form.image_url;
+      else if (form.image_url)        payload.image_url = form.image_url;
       await onSave(payload);
     } catch (err) {
       const d = err.response?.data;
@@ -455,9 +607,6 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
         : 'Failed to save. Please check all fields.');
     } finally { setBusy(false); }
   }
-
-  const selectedCat = categories.find(c => c.id === Number(form.category));
-  const isIDCat = selectedCat?.name?.toLowerCase().includes('id');
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 600 }}>
@@ -492,7 +641,25 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
           onChange={handle} placeholder="e.g. Blue Backpack, IITB ID Card" maxLength={200} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      {/* Category (full width for LOST; half-width row with collect_from for FOUND) */}
+      {isFound ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Category</label>
+            <select name="category" className="category-select" value={form.category} onChange={handle}>
+              <option value="">-- Select category --</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Collection From</label>
+            <select name="collect_from" className="category-select" value={form.collect_from} onChange={handle}>
+              <option value="ME">📞 Me (finder)</option>
+              <option value="SECURITY">🏢 Security Office</option>
+            </select>
+          </div>
+        </div>
+      ) : (
         <div className="form-group">
           <label>Category</label>
           <select name="category" className="category-select" value={form.category} onChange={handle}>
@@ -500,22 +667,16 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
             {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
           </select>
         </div>
-        <div className="form-group">
-          <label>Contact Via</label>
-          <select name="contact_type" className="category-select" value={form.contact_type} onChange={handle}>
-            <option value="ME">📞 Me (direct)</option>
-            <option value="SECURITY">🏢 Security Office</option>
-          </select>
-        </div>
-      </div>
+      )}
 
+      {/* ID Card number — FOUND + ID Card category only */}
       {isIDCat && (
         <div className="form-group">
-          <label>Roll Number on ID Card</label>
-          <input name="roll_number" className="search-input" value={form.roll_number}
+          <label>Roll Number on ID Card *</label>
+          <input name="id_card_number" className="search-input" value={form.id_card_number}
             onChange={handle} placeholder="e.g. 22B1234" maxLength={20} />
           <small style={{ color: 'var(--text-secondary)', marginTop: 3, display: 'block' }}>
-            Owner will be notified automatically.
+            The owner will be notified automatically.
           </small>
         </div>
       )}
@@ -533,19 +694,29 @@ function LFForm({ initial, categories, onSave, onCancel, isEdit = false }) {
           onChange={handle} placeholder="e.g. hp, laptop, silver" />
       </div>
 
+      {/* Location — predefined dropdown only (no free text) */}
       <div className="form-group">
-        <label>Location</label>
+        <label>Location *</label>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <input name="location_name" className="search-input" style={{ flex: 1 }}
-            value={form.location_name} onChange={handle}
-            placeholder="e.g. Central Library, Hostel 5 mess" />
-          <button type="button" className="btn" style={{ flexShrink: 0, fontSize: '0.8rem' }} onClick={useGPS}>
-            📍 GPS
+          <select name="location_name" className="category-select" style={{ flex: 1 }}
+            value={form.location_name} onChange={handle}>
+            <option value="">-- Select campus location --</option>
+            {LF_LOCATIONS.map(g => (
+              <optgroup key={g.group} label={g.group}>
+                {g.items.map(loc => (
+                  <option key={loc.value} value={loc.value}>{loc.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button type="button" className="btn" style={{ flexShrink: 0, fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            onClick={handleGPS} disabled={gpsLoading}>
+            {gpsLoading ? '…' : '📍 Use GPS'}
           </button>
         </div>
-        {form.latitude && form.longitude && (
+        {form.latitude != null && form.longitude != null && (
           <small style={{ color: '#16a34a', marginTop: 3, display: 'block' }}>
-            ✅ {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
+            📍 GPS: {form.location_name ? LF_LOCATION_LABEL[form.location_name] : 'detected'} — coordinates stored
           </small>
         )}
       </div>
@@ -821,7 +992,7 @@ function PendingTab({ onRefreshNotifs }) {
               <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📭</div>
               <p>No pending interactions yet.</p>
             </div>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          : <div style={GRID}>
               {items.map(item => (
                 <PendingItemCard key={item.id} item={item}
                   onResolve={handleResolve} onRevert={handleRevert} busy={busy} />
@@ -1019,25 +1190,42 @@ function MyActivityTab({ categories }) {
               </div>
           : claims.length === 0
             ? <p style={{ color: 'var(--text-secondary)' }}>You haven't interacted with any items yet.</p>
-            : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            : <div style={GRID}>
                 {claims.map(c => (
-                  <div key={c.id} style={{ ...ROW_CARD, padding: '0.85rem 1rem', gap: '0.9rem', alignItems: 'flex-start' }}>
-                    {c.item_image && (
-                      <img src={c.item_image} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{c.item_title}</div>
-                      <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                        <span style={{ ...typeBadge(c.item_type), marginRight: 6 }}>{c.item_type}</span>
-                        📍 {c.item_location || '—'}
+                  <div key={c.id} style={CARD_BASE}>
+                    {/* Image — 4:3 aspect */}
+                    <div style={{ width: '100%', aspectRatio: '4/3', background: '#f3f4f6', position: 'relative', flexShrink: 0, overflow: 'hidden' }}>
+                      {c.item_image
+                        ? <img src={c.item_image} alt={c.item_title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.2rem' }}>📦</div>
+                      }
+                      {/* LOST/FOUND badge */}
+                      <span style={{ position: 'absolute', top: 7, left: 7, ...typeBadge(c.item_type) }}>
+                        {c.item_type}
+                      </span>
+                      {/* Claim status badge */}
+                      <div style={{ position: 'absolute', bottom: 7, right: 7 }}>
+                        {claimChip(c.status)}
+                      </div>
+                    </div>
+                    {/* Body */}
+                    <div style={{ padding: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.28rem', flex: 1 }}>
+                      <strong style={{ fontSize: '0.88rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {c.item_title}
+                      </strong>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <span>📍</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.item_location || '—'}</span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                        🕐 {timeAgo(c.created_at)}
                       </div>
                       {c.message && (
-                        <div style={{ fontSize: '0.78rem', marginTop: 4, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                           "{c.message}"
                         </div>
                       )}
                     </div>
-                    {claimChip(c.status)}
                   </div>
                 ))}
               </div>
@@ -1047,19 +1235,58 @@ function MyActivityTab({ categories }) {
 }
 
 // ---------------------------------------------------------------------------
-// Analytics Tab — Security only: top lost locations
+// Analytics Tab — Security only: top lost locations + top lost categories
 // ---------------------------------------------------------------------------
+function SquareAnalyticsGrid({ items, keyField, labelField, iconField, countField, accentColor, icon, showAll, onToggle }) {
+  const shown = showAll ? items : items.slice(0, 10);
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+        {shown.map((row, i) => (
+          <div key={row[keyField]} style={{
+            ...CARD_BASE,
+            aspectRatio: '1/1', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', padding: '1rem',
+            textAlign: 'center',
+            borderTop: i === 0 ? '3px solid #ef4444' : i === 1 ? '3px solid #f97316' : i === 2 ? '3px solid #eab308' : `3px solid #e5e7eb`,
+          }}>
+            <div style={{ fontSize: '1.7rem', marginBottom: '0.3rem' }}>
+              {iconField ? (row[iconField] || icon) : (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : icon)}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '0.82rem', lineHeight: 1.3, marginBottom: '0.4rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+              {row[labelField]}
+            </div>
+            <div style={{ fontSize: '1.9rem', fontWeight: 800, color: accentColor, lineHeight: 1 }}>
+              {row[countField]}
+            </div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+              item{row[countField] !== 1 ? 's' : ''}
+            </div>
+          </div>
+        ))}
+      </div>
+      {items.length > 10 && (
+        <button className="btn" onClick={onToggle} style={{ fontSize: '0.85rem' }}>
+          {showAll ? 'Show Less' : `See More (${items.length - 10} more)`}
+        </button>
+      )}
+    </>
+  );
+}
+
 function AnalyticsTab({ user }) {
   const isSecurity = user?.is_security || user?.is_staff;
-  const [locations, setLocations] = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [showAll,   setShowAll]   = useState(false);
-  const [error,     setError]     = useState('');
+  const [locations,   setLocations]   = useState([]);
+  const [categories,  setCategories]  = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [showAllLocs, setShowAllLocs] = useState(false);
+  const [showAllCats, setShowAllCats] = useState(false);
 
   useEffect(() => {
     if (!isSecurity) { setLoading(false); return; }
-    getLFTopLostLocations()
-      .then(setLocations)
+    Promise.all([getLFTopLostLocations(), getLFTopLostCategories()])
+      .then(([locs, cats]) => { setLocations(locs); setCategories(cats); })
       .catch(() => setError('Failed to load analytics.'))
       .finally(() => setLoading(false));
   }, [isSecurity]);
@@ -1073,66 +1300,57 @@ function AnalyticsTab({ user }) {
     );
   }
 
-  const shown = showAll ? locations : locations.slice(0, 5);
-
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: '1.05rem' }}>🏨 Most Lost Item Locations</h3>
-          <p style={{ margin: '0.2rem 0 0', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-            Top locations where items are reported lost
-          </p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0, fontSize: '1.05rem' }}>📊 Lost &amp; Found Analytics</h3>
         <span style={{ fontSize: '0.75rem', background: '#fef3c7', color: '#92400e', padding: '0.25rem 0.6rem', borderRadius: 6, fontWeight: 600 }}>
           🏢 Security View
         </span>
       </div>
 
-      {loading
-        ? <p style={{ color: 'var(--text-secondary)' }}>Loading analytics…</p>
-        : error
-          ? <p style={{ color: '#991b1b' }}>{error}</p>
-          : locations.length === 0
-            ? <p style={{ color: 'var(--text-secondary)' }}>No data yet.</p>
-            : (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                  {shown.map((loc, i) => (
-                    <div key={loc.location_name} style={{
-                      ...CARD_BASE,
-                      padding: '1.25rem 1rem',
-                      textAlign: 'center',
-                      borderTop: i === 0 ? '3px solid #ef4444' : i === 1 ? '3px solid #f97316' : i === 2 ? '3px solid #eab308' : '3px solid #e5e7eb',
-                    }}>
-                      <div style={{ fontSize: '1.8rem', marginBottom: '0.4rem' }}>
-                        {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📍'}
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.5rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                        {loc.location_name}
-                      </div>
-                      <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444', lineHeight: 1 }}>
-                        {loc.count}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                        lost item{loc.count !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {!showAll && locations.length > 5 && (
-                  <button className="btn" onClick={() => setShowAll(true)} style={{ fontSize: '0.85rem' }}>
-                    See More ({locations.length - 5} more locations)
-                  </button>
-                )}
-                {showAll && locations.length > 5 && (
-                  <button className="btn" onClick={() => setShowAll(false)} style={{ fontSize: '0.85rem' }}>
-                    Show Less
-                  </button>
-                )}
-              </>
-            )
-      }
+      {loading ? (
+        <p style={{ color: 'var(--text-secondary)' }}>Loading analytics…</p>
+      ) : error ? (
+        <p style={{ color: '#991b1b' }}>{error}</p>
+      ) : (
+        <>
+          {/* Top Lost Locations */}
+          <div>
+            <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem' }}>🏨 Top Lost Item Locations</h4>
+            <p style={{ margin: '0 0 0.75rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              Campus locations with the most reported lost items
+            </p>
+            {locations.length === 0
+              ? <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>No location data yet.</p>
+              : <SquareAnalyticsGrid
+                  items={locations} keyField="location_name"
+                  labelField="location_name" iconField={null} countField="count"
+                  accentColor="#ef4444" icon="📍"
+                  showAll={showAllLocs} onToggle={() => setShowAllLocs(p => !p)}
+                />
+            }
+          </div>
+
+          {/* Top Lost Categories */}
+          <div>
+            <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem' }}>📦 Top Lost Item Categories</h4>
+            <p style={{ margin: '0 0 0.75rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              Categories most frequently reported as lost
+            </p>
+            {categories.length === 0
+              ? <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>No category data yet.</p>
+              : <SquareAnalyticsGrid
+                  items={categories} keyField="category_name"
+                  labelField="category_name" iconField="category_icon" countField="count"
+                  accentColor="#3b82f6" icon="📦"
+                  showAll={showAllCats} onToggle={() => setShowAllCats(p => !p)}
+                />
+            }
+          </div>
+        </>
+      )}
     </div>
   );
 }

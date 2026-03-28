@@ -12,6 +12,7 @@ from .models import (
     FOOD_DELIVERY_LOCATION_CHOICES, FOOD_ORDER_TYPE_CHOICES,
     # Lost & Found
     LFCategory, LFItem, LFClaim, LFNotification, LFLog,
+    LF_CAMPUS_LOCATIONS, LF_VALID_LOCATION_KEYS,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -453,6 +454,8 @@ class LFItemSerializer(serializers.ModelSerializer):
     resolved_interaction = serializers.SerializerMethodField()
     is_reporter          = serializers.SerializerMethodField()
     is_interactor        = serializers.SerializerMethodField()
+    can_resolve          = serializers.SerializerMethodField()
+    can_revert           = serializers.SerializerMethodField()
 
     class Meta:
         model  = LFItem
@@ -466,6 +469,7 @@ class LFItemSerializer(serializers.ModelSerializer):
             'claim_count', 'user_has_claimed', 'distance_meters',
             'active_interaction', 'resolved_interaction',
             'is_reporter', 'is_interactor',
+            'can_resolve', 'can_revert',
             'date_reported',
         ]
 
@@ -568,12 +572,47 @@ class LFItemSerializer(serializers.ModelSerializer):
     def get_is_interactor(self, obj):
         return getattr(obj, '_user_has_claimed', False)
 
+    def get_can_resolve(self, obj):
+        """
+        True if the current user is permitted to call the resolve endpoint.
+        Rules mirror views.py resolve():
+          - contact_type=SECURITY → only security staff
+          - otherwise            → reporter OR security
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        u = request.user
+        is_security = getattr(u, 'is_security', False) or u.is_staff
+        is_reporter = obj.reporter_id == u.id
+        if obj.contact_type == 'SECURITY':
+            return is_security
+        return is_reporter or is_security
+
+    def get_can_revert(self, obj):
+        """True if the current user is permitted to call the revert endpoint."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        u = request.user
+        is_security = getattr(u, 'is_security', False) or u.is_staff
+        return obj.reporter_id == u.id or is_security
+
 
 class LFItemCreateSerializer(serializers.ModelSerializer):
-    tags      = _TagsField(required=False, default=list)
-    image     = serializers.ImageField(required=False, allow_null=True)
-    latitude  = serializers.FloatField(required=False, allow_null=True)
-    longitude = serializers.FloatField(required=False, allow_null=True)
+    tags           = _TagsField(required=False, default=list)
+    image          = serializers.ImageField(required=False, allow_null=True)
+    latitude       = serializers.FloatField(required=False, allow_null=True)
+    longitude      = serializers.FloatField(required=False, allow_null=True)
+    # FOUND-only: who holds the item; maps to contact_type on the model
+    collect_from   = serializers.ChoiceField(
+        choices=[('ME', 'Me'), ('SECURITY', 'Security Office')],
+        required=False, default='ME',
+    )
+    # FOUND + ID-Card: roll number on the card; maps to roll_number on the model
+    id_card_number = serializers.CharField(
+        required=False, allow_blank=True, max_length=20, default='',
+    )
 
     class Meta:
         model  = LFItem
@@ -581,13 +620,54 @@ class LFItemCreateSerializer(serializers.ModelSerializer):
             'item_type', 'title', 'description',
             'category', 'tags', 'image', 'image_url',
             'location_name', 'latitude', 'longitude',
-            'contact_type', 'roll_number',
+            'collect_from', 'id_card_number',
         ]
 
     def validate_item_type(self, v):
         if v not in ['LOST', 'FOUND']:
             raise serializers.ValidationError("Must be LOST or FOUND.")
         return v
+
+    def validate_location_name(self, v):
+        """Must be empty (GPS path) or one of the predefined campus keys."""
+        if v and v not in LF_VALID_LOCATION_KEYS:
+            raise serializers.ValidationError(
+                "Location must be selected from the predefined campus list."
+            )
+        return v
+
+    def validate(self, data):
+        item_type = data.get('item_type', '')
+        category  = data.get('category')
+        id_num    = (data.get('id_card_number') or '').strip()
+        if (item_type == 'FOUND' and category and
+                'id' in (category.name or '').lower() and not id_num):
+            raise serializers.ValidationError(
+                {'id_card_number': 'Roll number on the ID card is required.'}
+            )
+        return data
+
+    def create(self, validated_data):
+        collect_from   = validated_data.pop('collect_from', 'ME')
+        id_card_number = validated_data.pop('id_card_number', '') or ''
+        item_type      = validated_data.get('item_type', 'LOST')
+        return LFItem.objects.create(
+            contact_type=collect_from if item_type == 'FOUND' else 'ME',
+            roll_number=id_card_number,
+            **validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        collect_from   = validated_data.pop('collect_from', None)
+        id_card_number = validated_data.pop('id_card_number', None)
+        if collect_from is not None and instance.item_type == 'FOUND':
+            instance.contact_type = collect_from
+        if id_card_number is not None:
+            instance.roll_number = id_card_number
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        instance.save()
+        return instance
 
 
 class LFClaimSerializer(serializers.ModelSerializer):

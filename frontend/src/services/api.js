@@ -154,8 +154,9 @@ export const getHistoryLFItems = ()           => api.get('/lf/items/history_item
 export const getLFTopTags     = ()            => api.get('/lf/items/top_tags/').then(r => r.data);
 export const getMyClaims      = ()            => api.get('/lf/my-claims/').then(r => r.data);
 export const getLFCategories  = ()            => api.get('/lf/categories/').then(r => r.data);
-export const getLFAnalytics          = ()  => api.get('/lf/analytics/').then(r => r.data);
-export const getLFTopLostLocations   = ()  => api.get('/lf/analytics/top-lost-locations/').then(r => r.data);
+export const getLFAnalytics           = ()  => api.get('/lf/analytics/').then(r => r.data);
+export const getLFTopLostLocations    = ()  => api.get('/lf/analytics/top-lost-locations/').then(r => r.data);
+export const getLFTopLostCategories   = ()  => api.get('/lf/analytics/top-lost-categories/').then(r => r.data);
 
 export const getLFNotifications  = ()   => api.get('/lf/notifications/').then(r => r.data);
 export const markLFNotifRead     = (id) => api.post(`/lf/notifications/${id}/read/`).then(r => r.data);
