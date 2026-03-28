@@ -76,9 +76,10 @@ urlpatterns = [
     # --- Lost & Found ---
     path('lf/', include(lf_item_router.urls)),
     path('lf/', include(lf_notif_router.urls)),
-    path('lf/my-claims/',   views.LFClaimListView.as_view(),    name='lf-my-claims'),
-    path('lf/categories/',  views.LFCategoryListView.as_view(), name='lf-categories'),
-    path('lf/analytics/',   views.LFAnalyticsView.as_view(),    name='lf-analytics'),
+    path('lf/my-claims/',                      views.LFClaimListView.as_view(),           name='lf-my-claims'),
+    path('lf/categories/',                     views.LFCategoryListView.as_view(),        name='lf-categories'),
+    path('lf/analytics/',                      views.LFAnalyticsView.as_view(),           name='lf-analytics'),
+    path('lf/analytics/top-lost-locations/',   views.LFTopLostLocationsView.as_view(),   name='lf-top-lost-locations'),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),
