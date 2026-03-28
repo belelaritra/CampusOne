@@ -79,7 +79,8 @@ urlpatterns = [
     path('lf/my-claims/',                      views.LFClaimListView.as_view(),           name='lf-my-claims'),
     path('lf/categories/',                     views.LFCategoryListView.as_view(),        name='lf-categories'),
     path('lf/analytics/',                      views.LFAnalyticsView.as_view(),           name='lf-analytics'),
-    path('lf/analytics/top-lost-locations/',   views.LFTopLostLocationsView.as_view(),   name='lf-top-lost-locations'),
+    path('lf/analytics/top-lost-locations/',   views.LFTopLostLocationsView.as_view(),    name='lf-top-lost-locations'),
+    path('lf/analytics/top-lost-categories/', views.LFTopLostCategoriesView.as_view(),   name='lf-top-lost-categories'),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),

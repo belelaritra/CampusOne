@@ -1122,7 +1122,7 @@ class DailySalesAnalyticsView(AnalyticsBaseView):
 # Lost & Found Module
 # ===========================================================================
 
-# Approximate campus coords for distance calculation when item has no GPS data
+# Predefined IITB campus location coordinates — used for GPS → nearest-location resolution
 LF_LOCATION_COORDS = {
     'main_gate':     (19.12845641460189,  72.91926132752846),
     'gulmohar':      (19.129814529274448, 72.91533444403758),
@@ -1135,7 +1135,30 @@ LF_LOCATION_COORDS = {
     'main_building': (19.13360, 72.91270),
     'conv_hall':     (19.13220, 72.91050),
     'sjmsom':        (19.13520, 72.90980),
+    # Hostel cluster (approximate)
+    'hostel_1':   (19.13046, 72.91560), 'hostel_2':   (19.13012, 72.91520),
+    'hostel_3':   (19.12988, 72.91490), 'hostel_4':   (19.12960, 72.91460),
+    'hostel_5':   (19.12940, 72.91420), 'hostel_6':   (19.12910, 72.91380),
+    'hostel_7':   (19.12880, 72.91350), 'hostel_8':   (19.12850, 72.91310),
+    'hostel_9':   (19.12820, 72.91280), 'hostel_10':  (19.12790, 72.91250),
+    'hostel_11':  (19.13200, 72.91650), 'hostel_12':  (19.13180, 72.91680),
+    'hostel_13':  (19.13250, 72.91700), 'hostel_14':  (19.13270, 72.91720),
+    'hostel_15':  (19.13290, 72.91740), 'hostel_16':  (19.13310, 72.91760),
+    'hostel_17':  (19.13330, 72.91780), 'hostel_18':  (19.13350, 72.91800),
+    'hostel_19':  (19.13370, 72.91820), 'hostel_21':  (19.13390, 72.91840),
+    'tansa_house':(19.13420, 72.91860),
 }
+
+
+def _nearest_lf_location(lat, lng):
+    """Return the key of the nearest predefined IITB location."""
+    best_key, best_dist = '', float('inf')
+    for key, coords in LF_LOCATION_COORDS.items():
+        d = haversine(lat, lng, *coords)
+        if d < best_dist:
+            best_dist = d
+            best_key = key
+    return best_key
 
 
 def _lf_suggestion_score(candidate, ref_tags, ref_words, ref_cat_id):
@@ -1297,8 +1320,16 @@ class LFItemViewSet(viewsets.ViewSet):
         serializer = LFItemCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        save_kwargs = {'reporter': request.user}
+        # GPS path: if no location_name but lat/lng given, resolve to nearest campus location
+        vd = serializer.validated_data
+        if not vd.get('location_name') and vd.get('latitude') and vd.get('longitude'):
+            save_kwargs['location_name'] = _nearest_lf_location(
+                vd['latitude'], vd['longitude']
+            )
+
         with transaction.atomic():
-            item = serializer.save(reporter=request.user)
+            item = serializer.save(**save_kwargs)
             LFLog.objects.create(
                 item=item, actor=request.user, action='POSTED',
                 detail=f"{item.item_type}: {item.title}",
@@ -1339,8 +1370,16 @@ class LFItemViewSet(viewsets.ViewSet):
 
         serializer = LFItemCreateSerializer(item, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+
+        save_kwargs = {}
+        vd = serializer.validated_data
+        if not vd.get('location_name') and vd.get('latitude') and vd.get('longitude'):
+            save_kwargs['location_name'] = _nearest_lf_location(
+                vd['latitude'], vd['longitude']
+            )
+
         with transaction.atomic():
-            updated = serializer.save()
+            updated = serializer.save(**save_kwargs)
             LFLog.objects.create(item=updated, actor=request.user, action='EDITED')
 
         _annotate_claims([updated], request.user.id)
@@ -1694,7 +1733,7 @@ class LFAnalyticsView(APIView):
 class LFTopLostLocationsView(APIView):
     """
     GET /api/lf/analytics/top-lost-locations/
-    Security office only — returns top 10 locations with the most LOST items.
+    Security office only — returns locations with most LOST items (all, frontend slices to top 10).
     """
     permission_classes = [IsAuthenticated]
 
@@ -1708,6 +1747,35 @@ class LFTopLostLocationsView(APIView):
             .exclude(location_name='')
             .values('location_name')
             .annotate(count=Count('id'))
-            .order_by('-count')[:10]
+            .order_by('-count')
         )
         return Response(locations)
+
+
+class LFTopLostCategoriesView(APIView):
+    """
+    GET /api/lf/analytics/top-lost-categories/
+    Security office only — returns categories with most LOST items.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not (getattr(request.user, 'is_security', False) or request.user.is_staff):
+            return Response({'detail': 'Security access only.'}, status=403)
+
+        data = list(
+            LFItem.objects
+            .filter(item_type=LFItem.TYPE_LOST)
+            .exclude(category__isnull=True)
+            .values('category__name', 'category__icon')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        return Response([
+            {
+                'category_name': r['category__name'],
+                'category_icon': r['category__icon'] or '📦',
+                'count':         r['count'],
+            }
+            for r in data
+        ])

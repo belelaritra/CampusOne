@@ -372,8 +372,10 @@ LF_CAMPUS_LOCATIONS = [
     ('hostel_17', 'Hostel 17'), ('hostel_18', 'Hostel 18'),
     ('hostel_19', 'Hostel 19'), ('hostel_21', 'Hostel 21'),
     ('tansa_house', 'Tansa House'),
-    ('other',       'Other / Custom'),
 ]
+
+# Fast lookup set used by the serializer for location validation
+LF_VALID_LOCATION_KEYS = {k for k, _ in LF_CAMPUS_LOCATIONS}
 
 LF_CONTACT_CHOICES = [
     ('ME',       'Direct (my contact)'),
