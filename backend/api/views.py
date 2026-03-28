@@ -1165,7 +1165,7 @@ def _annotate_distance(items, user_lat, user_lng):
 
 
 def _annotate_claims(items, user_id):
-    """Attach _claim_count, _user_has_claimed, and _active_interaction to each item (no N+1)."""
+    """Attach _claim_count, _user_has_claimed, _active_interaction, _resolved_interaction (no N+1)."""
     if not items:
         return
     ids = [i.pk for i in items]
@@ -1179,10 +1179,19 @@ def _annotate_claims(items, user_id):
         .select_related('claimant')
     )
     active_map = {c.item_id: c for c in active_qs}
+    # Most recent resolved interaction (for history display)
+    resolved_map: dict = {}
+    for c in (
+        LFClaim.objects.filter(item_id__in=ids, status='RESOLVED')
+        .select_related('claimant')
+        .order_by('item_id', '-created_at')
+    ):
+        resolved_map.setdefault(c.item_id, c)
     for item in items:
         item._claim_count = counts.get(item.pk, 0)
         ai = active_map.get(item.pk)
-        item._active_interaction = ai
+        item._active_interaction    = ai
+        item._resolved_interaction  = resolved_map.get(item.pk)
         # _user_has_claimed means "current user is the active pending interactor"
         item._user_has_claimed = ai is not None and ai.claimant_id == user_id
 
@@ -1679,3 +1688,26 @@ class LFAnalyticsView(APIView):
             'top_locations':  top_locs,
             'top_tags':       [{'tag': t, 'count': c} for t, c in top_tags],
         })
+
+
+# ---------------------------------------------------------------------------
+class LFTopLostLocationsView(APIView):
+    """
+    GET /api/lf/analytics/top-lost-locations/
+    Security office only — returns top 10 locations with the most LOST items.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not (getattr(request.user, 'is_security', False) or request.user.is_staff):
+            return Response({'detail': 'Security access only.'}, status=403)
+
+        locations = list(
+            LFItem.objects
+            .filter(item_type=LFItem.TYPE_LOST)
+            .exclude(location_name='')
+            .values('location_name')
+            .annotate(count=Count('id'))
+            .order_by('-count')[:10]
+        )
+        return Response(locations)

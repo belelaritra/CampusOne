@@ -224,3 +224,11 @@ Check:
 * 🔔 Notifications system
 
 ---
+# For Security User Creation 
+
+cd backend
+/Users/aritrabelel/myenv/bin/python manage.py create_security_user \
+  --username security_office \
+  --password mysecurepass \
+  --full-name "Security Office" \
+  --phone 9876543210

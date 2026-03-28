@@ -57,6 +57,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'phone', 'full_name',
             'phone_number', 'roll_number', 'points',
             'is_outlet_admin', 'outlet_id', 'outlet_name',
+            'is_security',
         ]
         read_only_fields = fields
 
@@ -448,9 +449,10 @@ class LFItemSerializer(serializers.ModelSerializer):
     claim_count        = serializers.SerializerMethodField()
     user_has_claimed   = serializers.SerializerMethodField()
     distance_meters    = serializers.SerializerMethodField()
-    active_interaction = serializers.SerializerMethodField()
-    is_reporter        = serializers.SerializerMethodField()
-    is_interactor      = serializers.SerializerMethodField()
+    active_interaction   = serializers.SerializerMethodField()
+    resolved_interaction = serializers.SerializerMethodField()
+    is_reporter          = serializers.SerializerMethodField()
+    is_interactor        = serializers.SerializerMethodField()
 
     class Meta:
         model  = LFItem
@@ -462,7 +464,8 @@ class LFItemSerializer(serializers.ModelSerializer):
             'contact_type', 'roll_number',
             'reporter_username', 'reporter_name', 'reporter_roll', 'reporter_phone',
             'claim_count', 'user_has_claimed', 'distance_meters',
-            'active_interaction', 'is_reporter', 'is_interactor',
+            'active_interaction', 'resolved_interaction',
+            'is_reporter', 'is_interactor',
             'date_reported',
         ]
 
@@ -496,15 +499,6 @@ class LFItemSerializer(serializers.ModelSerializer):
 
     def get_distance_meters(self, obj):
         return getattr(obj, '_distance', None)
-
-    def get_is_reporter(self, obj):
-        request = self.context.get('request')
-        if not request or not request.user.is_authenticated:
-            return False
-        return obj.reporter_id == request.user.id
-
-    def get_is_interactor(self, obj):
-        return getattr(obj, '_user_has_claimed', False)
 
     def get_active_interaction(self, obj):
         """
@@ -551,6 +545,28 @@ class LFItemSerializer(serializers.ModelSerializer):
             )
 
         return data
+
+    def get_resolved_interaction(self, obj):
+        """For RESOLVED items: who resolved it and when (interactor name + resolved_at)."""
+        if obj.status != 'RESOLVED':
+            return None
+        ri = getattr(obj, '_resolved_interaction', None)
+        if ri is None:
+            return None
+        return {
+            'interactor_name':     ri.claimant.full_name or ri.claimant.username,
+            'interactor_username': ri.claimant.username,
+            'resolved_at':         ri.created_at,
+        }
+
+    def get_is_reporter(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.reporter_id == request.user.id
+
+    def get_is_interactor(self, obj):
+        return getattr(obj, '_user_has_claimed', False)
 
 
 class LFItemCreateSerializer(serializers.ModelSerializer):
