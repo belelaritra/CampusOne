@@ -24,6 +24,15 @@ food_admin_menu_router = DefaultRouter()
 food_admin_menu_router.register(r'menu', views.AdminMenuViewSet, basename='food-admin-menu')
 
 # ---------------------------------------------------------------------------
+# Mess Module routers
+# ---------------------------------------------------------------------------
+mess_coupon_router = DefaultRouter()
+mess_coupon_router.register(r'coupons', views.GuestCouponViewSet, basename='mess-coupon')
+
+mess_rebate_router = DefaultRouter()
+mess_rebate_router.register(r'rebates', views.RebateViewSet, basename='mess-rebate')
+
+# ---------------------------------------------------------------------------
 # Legacy campus routers (unchanged)
 # ---------------------------------------------------------------------------
 campus_router = DefaultRouter()
@@ -81,6 +90,14 @@ urlpatterns = [
     path('lf/analytics/',                      views.LFAnalyticsView.as_view(),           name='lf-analytics'),
     path('lf/analytics/top-lost-locations/',   views.LFTopLostLocationsView.as_view(),    name='lf-top-lost-locations'),
     path('lf/analytics/top-lost-categories/', views.LFTopLostCategoriesView.as_view(),   name='lf-top-lost-categories'),
+
+    # --- Mess Module ---
+    path('mess/settings/',   views.MessSettingsView.as_view(),  name='mess-settings'),
+    path('mess/menu/',       views.DailyMenuView.as_view(),     name='mess-menu'),
+    path('mess/sma/',        views.MessSMAView.as_view(),       name='mess-sma'),
+    path('mess/analytics/',  views.MessAnalyticsView.as_view(), name='mess-analytics'),
+    path('mess/', include(mess_coupon_router.urls)),
+    path('mess/', include(mess_rebate_router.urls)),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),
