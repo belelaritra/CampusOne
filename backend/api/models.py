@@ -13,6 +13,8 @@ class User(AbstractUser):
     full_name    = models.CharField(max_length=150, blank=True)
     phone_number = models.CharField(max_length=15,  blank=True)
     roll_number  = models.CharField(max_length=20,  blank=True)
+    hostel       = models.CharField(max_length=30,  blank=True)  # e.g. 'hostel_1'
+    room_number  = models.CharField(max_length=20,  blank=True)
     points      = models.PositiveIntegerField(default=0)
     is_security = models.BooleanField(default=False)
 
@@ -572,3 +574,160 @@ class CampusEvent(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# ---------------------------------------------------------------------------
+# Mess Module
+# ---------------------------------------------------------------------------
+
+MESS_HOSTEL_CHOICES = [
+    ('hostel_1',    'Hostel 1'),  ('hostel_2',    'Hostel 2'),
+    ('hostel_3',    'Hostel 3'),  ('hostel_4',    'Hostel 4'),
+    ('hostel_5',    'Hostel 5'),  ('hostel_6',    'Hostel 6'),
+    ('hostel_7',    'Hostel 7'),  ('hostel_8',    'Hostel 8'),
+    ('hostel_9',    'Hostel 9'),  ('hostel_10',   'Hostel 10'),
+    ('hostel_11',   'Hostel 11'), ('hostel_12',   'Hostel 12'),
+    ('hostel_13',   'Hostel 13'), ('hostel_14',   'Hostel 14'),
+    ('hostel_15',   'Hostel 15'), ('hostel_16',   'Hostel 16'),
+    ('hostel_17',   'Hostel 17'), ('hostel_18',   'Hostel 18'),
+    ('hostel_19',   'Hostel 19'), ('hostel_21',   'Hostel 21'),
+    ('tansa_house', 'Tansa House'),
+]
+MESS_HOSTEL_KEYS  = {k for k, _ in MESS_HOSTEL_CHOICES}
+MESS_HOSTEL_LABEL = dict(MESS_HOSTEL_CHOICES)
+
+MESS_MEAL_CHOICES = [
+    ('BREAKFAST', 'Breakfast'),
+    ('LUNCH',     'Lunch'),
+    ('SNACKS',    'Snacks'),
+    ('DINNER',    'Dinner'),
+]
+MESS_MEAL_KEYS  = {k for k, _ in MESS_MEAL_CHOICES}
+MESS_MEAL_LABEL = dict(MESS_MEAL_CHOICES)
+
+
+class MessHostelSettings(models.Model):
+    """Per-hostel configuration: SMA amounts, meal deduction rates, guest coupon pricing & limits."""
+    hostel                   = models.CharField(max_length=30, choices=MESS_HOSTEL_CHOICES, unique=True)
+    monthly_sma              = models.DecimalField(max_digits=10, decimal_places=2, default=27000)
+    # Daily meal deductions
+    breakfast_deduction      = models.DecimalField(max_digits=6, decimal_places=2, default=35)
+    lunch_deduction          = models.DecimalField(max_digits=6, decimal_places=2, default=40)
+    snacks_deduction         = models.DecimalField(max_digits=6, decimal_places=2, default=35)
+    dinner_deduction         = models.DecimalField(max_digits=6, decimal_places=2, default=40)
+    # Guest coupon prices
+    guest_breakfast_price    = models.DecimalField(max_digits=6, decimal_places=2, default=50)
+    guest_lunch_price        = models.DecimalField(max_digits=6, decimal_places=2, default=65)
+    guest_snacks_price       = models.DecimalField(max_digits=6, decimal_places=2, default=50)
+    guest_dinner_price       = models.DecimalField(max_digits=6, decimal_places=2, default=65)
+    # Limits
+    guest_slot_daily_limit   = models.PositiveIntegerField(default=50)   # total per slot per hostel per day
+    guest_student_slot_limit = models.PositiveIntegerField(default=10)   # per student per slot per day
+    updated_at               = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = 'Mess Hostel Settings'
+        verbose_name_plural = 'Mess Hostel Settings'
+
+    def __str__(self):
+        return f"Settings – {self.get_hostel_display()}"
+
+    @property
+    def daily_total(self):
+        return (self.breakfast_deduction + self.lunch_deduction +
+                self.snacks_deduction   + self.dinner_deduction)
+
+    def guest_price(self, meal_type):
+        return {
+            'BREAKFAST': self.guest_breakfast_price,
+            'LUNCH':     self.guest_lunch_price,
+            'SNACKS':    self.guest_snacks_price,
+            'DINNER':    self.guest_dinner_price,
+        }.get(meal_type)
+
+
+class MessAdminProfile(models.Model):
+    """Links a User to exactly one hostel as its mess administrator."""
+    user   = models.OneToOneField(User, on_delete=models.CASCADE, related_name='mess_admin_profile')
+    hostel = models.CharField(max_length=30, choices=MESS_HOSTEL_CHOICES)
+
+    class Meta:
+        verbose_name = 'Mess Admin Profile'
+
+    def __str__(self):
+        return f"{self.user.username} → {self.get_hostel_display()}"
+
+
+class DailyMenu(models.Model):
+    """Menu for one hostel, one date, one meal slot."""
+    hostel     = models.CharField(max_length=30, choices=MESS_HOSTEL_CHOICES, db_index=True)
+    date       = models.DateField(db_index=True)
+    meal_type  = models.CharField(max_length=10, choices=MESS_MEAL_CHOICES)
+    items      = models.TextField(blank=True, default='')
+    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='mess_menu_updates')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [['hostel', 'date', 'meal_type']]
+        ordering        = ['date', 'meal_type']
+
+    def __str__(self):
+        return f"{self.hostel} {self.date} {self.meal_type}"
+
+
+class GuestCouponPurchase(models.Model):
+    """Record of a student purchasing guest meal coupons for a hostel+date+meal."""
+    student      = models.ForeignKey(User, on_delete=models.CASCADE,
+                                     related_name='guest_coupon_purchases')
+    hostel       = models.CharField(max_length=30)
+    date         = models.DateField(db_index=True)
+    meal_type    = models.CharField(max_length=10, choices=MESS_MEAL_CHOICES)
+    quantity     = models.PositiveIntegerField()
+    unit_price   = models.DecimalField(max_digits=6, decimal_places=2)
+    total_amount = models.DecimalField(max_digits=8, decimal_places=2)
+    # Snapshot of student details at purchase time
+    roll_number  = models.CharField(max_length=20, blank=True)
+    room_number  = models.CharField(max_length=20, blank=True)
+    hostel_number= models.CharField(max_length=30, blank=True)  # student's own hostel
+    purchased_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-purchased_at']
+
+    def __str__(self):
+        return (f"{self.student.username} – {self.meal_type} ×{self.quantity} "
+                f"@ {self.hostel} on {self.date}")
+
+
+class RebateRequest(models.Model):
+    """A student's request to waive daily SMA deductions for a date range."""
+    STATUS_PENDING  = 'PENDING'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_CHOICES  = [
+        ('PENDING',  'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
+
+    student     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='rebate_requests')
+    hostel      = models.CharField(max_length=30)
+    start_date  = models.DateField()
+    end_date    = models.DateField()
+    days        = models.PositiveIntegerField()  # = (end_date - start_date).days + 1
+    reason      = models.TextField(blank=True, default='')
+    status      = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                                   default='PENDING', db_index=True)
+    admin_note  = models.TextField(blank=True, default='')
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='reviewed_rebates')
+    created_at  = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return (f"{self.student.username} rebate {self.start_date}→{self.end_date} "
+                f"[{self.status}]")

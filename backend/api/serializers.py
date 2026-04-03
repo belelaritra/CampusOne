@@ -13,6 +13,10 @@ from .models import (
     # Lost & Found
     LFCategory, LFItem, LFClaim, LFNotification, LFLog,
     LF_CAMPUS_LOCATIONS, LF_VALID_LOCATION_KEYS,
+    # Mess Module
+    MessHostelSettings, MessAdminProfile, DailyMenu,
+    GuestCouponPurchase, RebateRequest,
+    MESS_HOSTEL_KEYS, MESS_MEAL_KEYS, MESS_HOSTEL_LABEL, MESS_MEAL_LABEL,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -48,17 +52,19 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    is_outlet_admin = serializers.SerializerMethodField()
-    outlet_id       = serializers.SerializerMethodField()
-    outlet_name     = serializers.SerializerMethodField()
+    is_outlet_admin  = serializers.SerializerMethodField()
+    outlet_id        = serializers.SerializerMethodField()
+    outlet_name      = serializers.SerializerMethodField()
+    is_mess_admin    = serializers.SerializerMethodField()
+    mess_admin_hostel= serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'phone', 'full_name',
-            'phone_number', 'roll_number', 'points',
+            'phone_number', 'roll_number', 'hostel', 'room_number', 'points',
             'is_outlet_admin', 'outlet_id', 'outlet_name',
-            'is_security',
+            'is_security', 'is_mess_admin', 'mess_admin_hostel',
         ]
         read_only_fields = fields
 
@@ -77,11 +83,24 @@ class UserProfileSerializer(serializers.ModelSerializer):
         except OutletAdmin.DoesNotExist:
             return None
 
+    def get_is_mess_admin(self, obj):
+        if obj.is_staff:
+            return True
+        return MessAdminProfile.objects.filter(user=obj).exists()
+
+    def get_mess_admin_hostel(self, obj):
+        if obj.is_staff:
+            return None  # staff can manage all
+        try:
+            return obj.mess_admin_profile.hostel
+        except MessAdminProfile.DoesNotExist:
+            return None
+
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['full_name', 'phone_number', 'roll_number']
+        fields = ['full_name', 'phone_number', 'roll_number', 'hostel', 'room_number']
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -714,3 +733,202 @@ class LFNotificationSerializer(serializers.ModelSerializer):
         model  = LFNotification
         fields = ['id', 'message', 'item', 'item_title', 'item_type', 'is_read', 'created_at']
         read_only_fields = fields
+
+
+# ---------------------------------------------------------------------------
+# Mess Module Serializers
+# ---------------------------------------------------------------------------
+
+class MessHostelSettingsSerializer(serializers.ModelSerializer):
+    hostel_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = MessHostelSettings
+        fields = [
+            'id', 'hostel', 'hostel_display',
+            'monthly_sma',
+            'breakfast_deduction', 'lunch_deduction',
+            'snacks_deduction',    'dinner_deduction',
+            'guest_breakfast_price', 'guest_lunch_price',
+            'guest_snacks_price',    'guest_dinner_price',
+            'guest_slot_daily_limit', 'guest_student_slot_limit',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'hostel_display', 'updated_at']
+
+    def get_hostel_display(self, obj):
+        return MESS_HOSTEL_LABEL.get(obj.hostel, obj.hostel)
+
+    def validate_hostel(self, value):
+        if value not in MESS_HOSTEL_KEYS:
+            raise serializers.ValidationError(f"Invalid hostel key: {value}")
+        return value
+
+
+class DailyMenuSerializer(serializers.ModelSerializer):
+    hostel_display    = serializers.SerializerMethodField()
+    meal_type_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = DailyMenu
+        fields = [
+            'id', 'hostel', 'hostel_display', 'date',
+            'meal_type', 'meal_type_display', 'items', 'updated_at',
+        ]
+        read_only_fields = ['id', 'hostel_display', 'meal_type_display', 'updated_at']
+
+    def get_hostel_display(self, obj):
+        return MESS_HOSTEL_LABEL.get(obj.hostel, obj.hostel)
+
+    def get_meal_type_display(self, obj):
+        return MESS_MEAL_LABEL.get(obj.meal_type, obj.meal_type)
+
+    def validate_hostel(self, value):
+        if value not in MESS_HOSTEL_KEYS:
+            raise serializers.ValidationError(f"Invalid hostel key: {value}")
+        return value
+
+    def validate_meal_type(self, value):
+        if value not in MESS_MEAL_KEYS:
+            raise serializers.ValidationError(f"Invalid meal type: {value}")
+        return value
+
+
+class GuestCouponReadSerializer(serializers.ModelSerializer):
+    student_username = serializers.CharField(source='student.username', read_only=True)
+    student_name     = serializers.CharField(source='student.full_name', read_only=True)
+    hostel_display   = serializers.SerializerMethodField()
+    meal_display     = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = GuestCouponPurchase
+        fields = [
+            'id', 'student_username', 'student_name',
+            'hostel', 'hostel_display', 'date',
+            'meal_type', 'meal_display', 'quantity',
+            'unit_price', 'total_amount',
+            'roll_number', 'room_number', 'hostel_number',
+            'purchased_at',
+        ]
+        read_only_fields = fields
+
+    def get_hostel_display(self, obj):
+        return MESS_HOSTEL_LABEL.get(obj.hostel, obj.hostel)
+
+    def get_meal_display(self, obj):
+        return MESS_MEAL_LABEL.get(obj.meal_type, obj.meal_type)
+
+
+class GuestCouponCreateSerializer(serializers.Serializer):
+    hostel    = serializers.CharField()
+    date      = serializers.DateField()
+    meal_type = serializers.CharField()
+    quantity  = serializers.IntegerField(min_value=1)
+
+    def validate_hostel(self, value):
+        if value not in MESS_HOSTEL_KEYS:
+            raise serializers.ValidationError(f"Invalid hostel: {value}")
+        return value
+
+    def validate_meal_type(self, value):
+        if value not in MESS_MEAL_KEYS:
+            raise serializers.ValidationError(f"Invalid meal type: {value}")
+        return value
+
+    def validate(self, data):
+        from django.db.models import Sum as _Sum
+        request  = self.context['request']
+        student  = request.user
+        hostel   = data['hostel']
+        date     = data['date']
+        meal     = data['meal_type']
+        qty      = data['quantity']
+
+        # Load (or auto-create with defaults) settings for the target hostel
+        settings_obj, _ = MessHostelSettings.objects.get_or_create(hostel=hostel)
+
+        # Per-student cumulative check for this hostel/date/slot
+        student_total = (
+            GuestCouponPurchase.objects
+            .filter(student=student, hostel=hostel, date=date, meal_type=meal)
+            .aggregate(t=_Sum('quantity'))['t'] or 0
+        )
+        if student_total + qty > settings_obj.guest_student_slot_limit:
+            raise serializers.ValidationError(
+                f"You can buy at most {settings_obj.guest_student_slot_limit} coupons per slot. "
+                f"You already have {student_total}."
+            )
+
+        # Total across all students for this hostel/date/slot
+        slot_total = (
+            GuestCouponPurchase.objects
+            .filter(hostel=hostel, date=date, meal_type=meal)
+            .aggregate(t=_Sum('quantity'))['t'] or 0
+        )
+        if slot_total + qty > settings_obj.guest_slot_daily_limit:
+            available = settings_obj.guest_slot_daily_limit - slot_total
+            raise serializers.ValidationError(
+                f"Only {available} coupon(s) remaining for this slot today."
+            )
+
+        data['_settings'] = settings_obj
+        data['_student_total'] = student_total
+        return data
+
+
+class RebateRequestSerializer(serializers.ModelSerializer):
+    student_username = serializers.CharField(source='student.username', read_only=True)
+    student_name     = serializers.CharField(source='student.full_name', read_only=True)
+    student_roll     = serializers.CharField(source='student.roll_number', read_only=True)
+    hostel_display   = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = RebateRequest
+        fields = [
+            'id', 'student_username', 'student_name', 'student_roll',
+            'hostel', 'hostel_display',
+            'start_date', 'end_date', 'days', 'reason',
+            'status', 'admin_note',
+            'reviewed_by_name', 'created_at', 'reviewed_at',
+        ]
+        read_only_fields = [
+            'id', 'student_username', 'student_name', 'student_roll',
+            'hostel_display', 'days', 'status', 'admin_note',
+            'reviewed_by_name', 'created_at', 'reviewed_at',
+        ]
+
+    def get_hostel_display(self, obj):
+        return MESS_HOSTEL_LABEL.get(obj.hostel, obj.hostel)
+
+    def get_reviewed_by_name(self, obj):
+        if obj.reviewed_by:
+            return obj.reviewed_by.full_name or obj.reviewed_by.username
+        return None
+
+    def validate(self, data):
+        start = data.get('start_date')
+        end   = data.get('end_date')
+        if start and end:
+            if end < start:
+                raise serializers.ValidationError("end_date must be on or after start_date.")
+            days = (end - start).days + 1
+            if days < 3:
+                raise serializers.ValidationError("Rebate must be at least 3 days.")
+            if days > 15:
+                raise serializers.ValidationError("Rebate cannot exceed 15 days.")
+            data['days'] = days
+        return data
+
+    def create(self, validated_data):
+        request = self.context['request']
+        user    = request.user
+        hostel  = user.hostel or ''
+        validated_data['student'] = user
+        validated_data['hostel']  = hostel
+        return super().create(validated_data)
+
+
+class RebateReviewSerializer(serializers.Serializer):
+    status     = serializers.ChoiceField(choices=['APPROVED', 'REJECTED'])
+    admin_note = serializers.CharField(required=False, allow_blank=True, default='')

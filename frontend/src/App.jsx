@@ -21,6 +21,7 @@ import Courses from './pages/Courses.jsx';
 import Hospital from './pages/Hospital.jsx';
 import BuggyPass from './pages/BuggyPass.jsx';
 import LostFound from './pages/LostFound.jsx';
+import Mess from './pages/Mess.jsx';
 import Contacts from './pages/Contacts.jsx';
 import Marketplace from './pages/Marketplace.jsx';
 import Events from './pages/Events.jsx';
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="hospital"       element={<Hospital />} />
         <Route path="buggy"          element={<BuggyPass />} />
         <Route path="lostfound"      element={<LostFound />} />
+        <Route path="mess"           element={<Mess />} />
         <Route path="contacts"       element={<Contacts />} />
         <Route path="marketplace"    element={<Marketplace />} />
         <Route path="events"         element={<Events />} />

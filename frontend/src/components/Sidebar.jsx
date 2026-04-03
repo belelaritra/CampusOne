@@ -3,7 +3,8 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const NAV_ITEMS = [
   { to: '/',           icon: '📊', label: 'Dashboard' },
-  { to: '/hostels',    icon: '🏠', label: 'Hostels & Mess' },
+  { to: '/hostels',    icon: '🏠', label: 'Hostels' },
+  { to: '/mess',       icon: '🍱', label: 'Mess' },
   { to: '/food',       icon: '🍕', label: 'Food Ordering' },
   { to: '/map',        icon: '🗺️', label: 'Campus Map' },
   { to: '/help',       icon: '🤝', label: 'Help & Delivery' },

@@ -163,6 +163,25 @@ export const markLFNotifRead     = (id) => api.post(`/lf/notifications/${id}/rea
 export const markAllLFNotifsRead = ()   => api.post('/lf/notifications/mark_all_read/').then(r => r.data);
 
 // ---------------------------------------------------------------------------
+// Mess Module API
+// ---------------------------------------------------------------------------
+export const getMessSettings    = (hostel)        => api.get('/mess/settings/', { params: { hostel } }).then(r => r.data);
+export const updateMessSettings = (data)          => api.patch('/mess/settings/', data).then(r => r.data);
+
+export const getMessMenu        = (hostel, date)  => api.get('/mess/menu/', { params: { hostel, date } }).then(r => r.data);
+export const upsertMessMenu     = (data)          => api.post('/mess/menu/', data).then(r => r.data);
+
+export const getGuestCoupons    = (params = {})   => api.get('/mess/coupons/', { params }).then(r => r.data);
+export const buyGuestCoupons    = (data)          => api.post('/mess/coupons/', data).then(r => r.data);
+
+export const getRebates         = (params = {})   => api.get('/mess/rebates/', { params }).then(r => r.data);
+export const submitRebate       = (data)          => api.post('/mess/rebates/', data).then(r => r.data);
+export const reviewRebate       = (id, data)      => api.post(`/mess/rebates/${id}/review/`, data).then(r => r.data);
+
+export const getMessSMA         = (params = {})   => api.get('/mess/sma/', { params }).then(r => r.data);
+export const getMessAnalytics   = ()              => api.get('/mess/analytics/').then(r => r.data);
+
+// ---------------------------------------------------------------------------
 // Legacy Campus API (unchanged)
 // ---------------------------------------------------------------------------
 export const getHostels    = () => api.get('/hostels/').then(r => r.data);
