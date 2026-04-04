@@ -182,6 +182,28 @@ export const getMessSMA         = (params = {})   => api.get('/mess/sma/', { par
 export const getMessAnalytics   = ()              => api.get('/mess/analytics/').then(r => r.data);
 
 // ---------------------------------------------------------------------------
+// Admin Master Console API (staff only)
+// ---------------------------------------------------------------------------
+export const getConsoleStats    = ()              => api.get('/console/stats/').then(r => r.data);
+
+export const getConsoleUsers    = (params = {})   => api.get('/console/users/', { params }).then(r => r.data);
+export const getConsoleUser     = (id)            => api.get(`/console/users/${id}/`).then(r => r.data);
+export const updateConsoleUser  = (id, data)      => api.patch(`/console/users/${id}/`, data).then(r => r.data);
+
+export const getConsoleMenus    = (params = {})   => api.get('/console/menus/', { params }).then(r => r.data);
+export const deleteConsoleMenu  = (id)            => api.delete(`/console/menus/${id}/`).then(r => r.data);
+
+export const getConsoleCoupons  = (params = {})   => api.get('/console/coupons/', { params }).then(r => r.data);
+export const deleteConsoleCoupon= (id)            => api.delete(`/console/coupons/${id}/`).then(r => r.data);
+
+export const getConsoleRebates  = (params = {})   => api.get('/console/rebates/', { params }).then(r => r.data);
+export const reviewConsoleRebate= (id, data)      => api.post(`/console/rebates/${id}/review/`, data).then(r => r.data);
+export const deleteConsoleRebate= (id)            => api.delete(`/console/rebates/${id}/`).then(r => r.data);
+
+export const getConsoleSettings = ()              => api.get('/console/settings/').then(r => r.data);
+export const updateConsoleSetting=(id, data)      => api.patch(`/console/settings/${id}/`, data).then(r => r.data);
+
+// ---------------------------------------------------------------------------
 // Legacy Campus API (unchanged)
 // ---------------------------------------------------------------------------
 export const getHostels    = () => api.get('/hostels/').then(r => r.data);
