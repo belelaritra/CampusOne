@@ -51,6 +51,15 @@ export default function Sidebar() {
             <span className="nav-label">{label}</span>
           </NavLink>
         ))}
+        {user?.is_staff && (
+          <NavLink
+            to="/admin"
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+          >
+            <span className="nav-icon">🔧</span>
+            <span className="nav-label">Admin Console</span>
+          </NavLink>
+        )}
       </nav>
 
       <div className="sidebar-footer">

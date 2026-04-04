@@ -100,7 +100,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['full_name', 'phone_number', 'roll_number', 'hostel', 'room_number']
+        fields = ['full_name', 'email', 'phone_number', 'roll_number', 'hostel', 'room_number']
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        qs = User.objects.filter(email=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -766,16 +776,21 @@ class MessHostelSettingsSerializer(serializers.ModelSerializer):
 
 
 class DailyMenuSerializer(serializers.ModelSerializer):
-    hostel_display    = serializers.SerializerMethodField()
-    meal_type_display = serializers.SerializerMethodField()
+    hostel_display       = serializers.SerializerMethodField()
+    meal_type_display    = serializers.SerializerMethodField()
+    created_by_username  = serializers.SerializerMethodField()
 
     class Meta:
         model  = DailyMenu
         fields = [
             'id', 'hostel', 'hostel_display', 'date',
             'meal_type', 'meal_type_display', 'items', 'updated_at',
+            'created_by_username',
         ]
-        read_only_fields = ['id', 'hostel_display', 'meal_type_display', 'updated_at']
+        read_only_fields = ['id', 'hostel_display', 'meal_type_display', 'updated_at', 'created_by_username']
+
+    def get_created_by_username(self, obj):
+        return obj.updated_by.username if obj.updated_by else None
 
     def get_hostel_display(self, obj):
         return MESS_HOSTEL_LABEL.get(obj.hostel, obj.hostel)
@@ -894,7 +909,7 @@ class RebateRequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'student_username', 'student_name', 'student_roll',
-            'hostel_display', 'days', 'status', 'admin_note',
+            'hostel', 'hostel_display', 'days', 'status', 'admin_note',
             'reviewed_by_name', 'created_at', 'reviewed_at',
         ]
 
@@ -913,8 +928,8 @@ class RebateRequestSerializer(serializers.ModelSerializer):
             if end < start:
                 raise serializers.ValidationError("end_date must be on or after start_date.")
             days = (end - start).days + 1
-            if days < 3:
-                raise serializers.ValidationError("Rebate must be at least 3 days.")
+            if days < 1:
+                raise serializers.ValidationError("Rebate must be at least 1 day.")
             if days > 15:
                 raise serializers.ValidationError("Rebate cannot exceed 15 days.")
             data['days'] = days
@@ -932,3 +947,76 @@ class RebateRequestSerializer(serializers.ModelSerializer):
 class RebateReviewSerializer(serializers.Serializer):
     status     = serializers.ChoiceField(choices=['APPROVED', 'REJECTED'])
     admin_note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+# ---------------------------------------------------------------------------
+# Admin Console Serializers (staff-only)
+# ---------------------------------------------------------------------------
+
+class AdminUserListSerializer(serializers.ModelSerializer):
+    is_mess_admin     = serializers.SerializerMethodField()
+    mess_admin_hostel = serializers.SerializerMethodField()
+    is_outlet_admin   = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = User
+        fields = [
+            'id', 'username', 'email', 'full_name', 'phone_number',
+            'roll_number', 'hostel', 'room_number', 'points',
+            'is_staff', 'is_security', 'is_active',
+            'is_mess_admin', 'mess_admin_hostel', 'is_outlet_admin',
+            'date_joined',
+        ]
+        read_only_fields = fields
+
+    def get_is_mess_admin(self, obj):
+        return obj.is_staff or MessAdminProfile.objects.filter(user=obj).exists()
+
+    def get_mess_admin_hostel(self, obj):
+        if obj.is_staff:
+            return None
+        try:
+            return obj.mess_admin_profile.hostel
+        except MessAdminProfile.DoesNotExist:
+            return None
+
+    def get_is_outlet_admin(self, obj):
+        return OutletAdmin.objects.filter(user=obj).exists()
+
+
+class AdminUserUpdateSerializer(serializers.ModelSerializer):
+    mess_admin_hostel = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, write_only=True
+    )
+
+    class Meta:
+        model  = User
+        fields = [
+            'full_name', 'email', 'phone_number', 'roll_number',
+            'hostel', 'room_number', 'is_staff', 'is_security', 'is_active',
+            'mess_admin_hostel',
+        ]
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        qs = User.objects.filter(email=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Email already in use.")
+        return value
+
+    def update(self, instance, validated_data):
+        mess_hostel = validated_data.pop('mess_admin_hostel', '__unset__')
+        instance = super().update(instance, validated_data)
+        # Update MessAdminProfile if supplied
+        if mess_hostel != '__unset__':
+            if mess_hostel and mess_hostel in MESS_HOSTEL_KEYS:
+                MessAdminProfile.objects.update_or_create(
+                    user=instance,
+                    defaults={'hostel': mess_hostel},
+                )
+            elif mess_hostel == '' or mess_hostel is None:
+                MessAdminProfile.objects.filter(user=instance).delete()
+        return instance

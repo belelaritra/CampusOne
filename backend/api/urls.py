@@ -1,5 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,24 @@ mess_rebate_router = DefaultRouter()
 mess_rebate_router.register(r'rebates', views.RebateViewSet, basename='mess-rebate')
 
 # ---------------------------------------------------------------------------
+# Admin Master Console routers (staff only)
+# ---------------------------------------------------------------------------
+console_user_router = DefaultRouter()
+console_user_router.register(r'users', views.ConsoleUserViewSet, basename='console-user')
+
+console_menu_router = DefaultRouter()
+console_menu_router.register(r'menus', views.ConsoleMenuViewSet, basename='console-menu')
+
+console_coupon_router = DefaultRouter()
+console_coupon_router.register(r'coupons', views.ConsoleCouponViewSet, basename='console-coupon')
+
+console_rebate_router = DefaultRouter()
+console_rebate_router.register(r'rebates', views.ConsoleRebateViewSet, basename='console-rebate')
+
+console_settings_router = DefaultRouter()
+console_settings_router.register(r'settings', views.ConsoleSettingsViewSet, basename='console-settings')
+
+# ---------------------------------------------------------------------------
 # Legacy campus routers (unchanged)
 # ---------------------------------------------------------------------------
 campus_router = DefaultRouter()
@@ -49,6 +68,7 @@ urlpatterns = [
     path('auth/register/',        views.RegisterView.as_view(),       name='auth-register'),
     path('auth/login/',           views.LoginView.as_view(),          name='auth-login'),
     path('auth/logout/',          views.LogoutView.as_view(),         name='auth-logout'),
+    path('auth/refresh/',         TokenRefreshView.as_view(),         name='auth-refresh'),
     path('auth/me/',              views.UserProfileView.as_view(),    name='auth-me'),
     path('auth/change-password/', views.ChangePasswordView.as_view(), name='auth-change-password'),
     path('auth/forgot-password/', views.ForgotPasswordView.as_view(), name='auth-forgot-password'),
@@ -98,6 +118,14 @@ urlpatterns = [
     path('mess/analytics/',  views.MessAnalyticsView.as_view(), name='mess-analytics'),
     path('mess/', include(mess_coupon_router.urls)),
     path('mess/', include(mess_rebate_router.urls)),
+
+    # --- Admin Master Console ---
+    path('console/stats/', views.ConsoleStatsView.as_view(), name='console-stats'),
+    path('console/', include(console_user_router.urls)),
+    path('console/', include(console_menu_router.urls)),
+    path('console/', include(console_coupon_router.urls)),
+    path('console/', include(console_rebate_router.urls)),
+    path('console/', include(console_settings_router.urls)),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),

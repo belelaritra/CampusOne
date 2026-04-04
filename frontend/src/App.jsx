@@ -26,6 +26,7 @@ import Contacts from './pages/Contacts.jsx';
 import Marketplace from './pages/Marketplace.jsx';
 import Events from './pages/Events.jsx';
 import Profile from './pages/Profile.jsx';
+import AdminConsole from './pages/AdminConsole.jsx';
 
 export default function App() {
   const { accessToken, refreshAccessToken } = useAuth();
@@ -63,6 +64,8 @@ export default function App() {
         <Route path="marketplace"    element={<Marketplace />} />
         <Route path="events"         element={<Events />} />
         <Route path="profile"        element={<Profile />} />
+        <Route path="admin-console" element={<AdminConsole />} />
+        <Route path="admin"         element={<AdminConsole />} />
       </Route>
 
       {/* Catch-all */}

@@ -28,7 +28,7 @@ from .models import (
     # Mess Module
     MessHostelSettings, MessAdminProfile, DailyMenu,
     GuestCouponPurchase, RebateRequest,
-    MESS_HOSTEL_KEYS, MESS_MEAL_KEYS,
+    MESS_HOSTEL_KEYS, MESS_MEAL_KEYS, MESS_HOSTEL_LABEL,
 )
 from .serializers import (
     RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
@@ -46,6 +46,8 @@ from .serializers import (
     MessHostelSettingsSerializer, DailyMenuSerializer,
     GuestCouponReadSerializer, GuestCouponCreateSerializer,
     RebateRequestSerializer, RebateReviewSerializer,
+    # Admin Console
+    AdminUserListSerializer, AdminUserUpdateSerializer,
 )
 
 
@@ -1819,50 +1821,65 @@ def _get_admin_hostel(user):
         return None
 
 
-def _compute_sma(user, year, month):
+def _current_semester(ref_date):
+    """Return (semester_start, semester_end, label) for the given date."""
+    y = ref_date.year
+    if ref_date.month <= 6:          # Spring: Jan 1 – Jun 30
+        return dt.date(y, 1, 1), dt.date(y, 6, 30), 'Spring'
+    else:                            # Autumn: Jul 1 – Dec 31
+        return dt.date(y, 7, 1), dt.date(y, 12, 31), 'Autumn'
+
+
+def _compute_sma(user, year=None, month=None):
     """
-    Return a full SMA breakdown for the given student/year/month.
+    Return SMA breakdown for the *current semester* the given date falls in.
+
+    Semesters:
+      Spring  – Jan 1 → Jun 30  (SMA loaded on Jan 1)
+      Autumn  – Jul 1 → Dec 31  (SMA loaded on Jul 1)
 
     Formula:
-      balance = monthly_sma
-                - sum_of_daily_deductions_for_elapsed_days   (0 on rebate days)
-                - sum_of_guest_coupon_costs_in_month
+      balance = semester_sma
+                - sum_of_daily_deductions_for_elapsed_days (0 on approved rebate days)
+                - sum_of_guest_coupon_costs_in_semester
     """
-    hostel = user.hostel or ''
+    today = dt.date.today()
+    if year is None:
+        year = today.year
+    if month is None:
+        month = today.month
 
+    ref_date = dt.date(year, month, 1)
+    semester_start, semester_end, semester_label = _current_semester(ref_date)
+    calc_end = min(today, semester_end)
+
+    hostel = user.hostel or ''
     settings_obj = MessHostelSettings.objects.filter(hostel=hostel).first()
     if settings_obj:
-        monthly_sma    = settings_obj.monthly_sma
-        daily_rate     = settings_obj.daily_total
+        semester_sma = settings_obj.monthly_sma   # field stores semester amount
+        daily_rate   = settings_obj.daily_total
     else:
-        monthly_sma = Decimal('27000')
-        daily_rate  = Decimal('150')
+        semester_sma = Decimal('27000')
+        daily_rate   = Decimal('150')
 
-    today       = dt.date.today()
-    month_start = dt.date(year, month, 1)
-    last_day    = calendar.monthrange(year, month)[1]
-    month_end   = dt.date(year, month, last_day)
-    calc_end    = min(today, month_end)
-
-    # Collect all approved rebate days that fall within this month
+    # Approved rebate days within the semester so far
     approved_rebates = RebateRequest.objects.filter(
         student=user,
-        hostel=hostel,
         status=RebateRequest.STATUS_APPROVED,
         start_date__lte=calc_end,
-        end_date__gte=month_start,
+        end_date__gte=semester_start,
     )
     rebate_days = set()
     for rb in approved_rebates:
-        cur = max(rb.start_date, month_start)
+        cur = max(rb.start_date, semester_start)
         end = min(rb.end_date, calc_end)
         while cur <= end:
             rebate_days.add(cur)
             cur += dt.timedelta(days=1)
 
-    # Sum daily deductions from month start → calc_end
+    # Sum daily deductions from semester_start → calc_end
     total_daily = Decimal('0')
-    cur = month_start
+    cur = semester_start
     while cur <= calc_end:
         if cur not in rebate_days:
             total_daily += daily_rate
@@ -1870,22 +1887,23 @@ def _compute_sma(user, year, month):
 
     rebate_savings = Decimal(str(len(rebate_days))) * daily_rate
 
-    # Guest coupon extra for this month
+    # Guest coupon extra for entire semester
     guest_extra = (
         GuestCouponPurchase.objects
-        .filter(student=user, date__year=year, date__month=month)
+        .filter(student=user, date__gte=semester_start, date__lte=calc_end)
         .aggregate(t=Sum('total_amount'))['t'] or Decimal('0')
     )
 
-    balance = monthly_sma - total_daily - guest_extra
-
-    days_elapsed = (calc_end - month_start).days + 1
+    balance = semester_sma - total_daily - guest_extra
+    days_elapsed = (calc_end - semester_start).days + 1
 
     return {
+        'semester':               semester_label,
+        'semester_start':         str(semester_start),
+        'semester_end':           str(semester_end),
         'year':                   year,
-        'month':                  month,
         'hostel':                 hostel,
-        'monthly_sma':            str(monthly_sma),
+        'semester_sma':           str(semester_sma),
         'daily_rate':             str(daily_rate),
         'days_elapsed':           days_elapsed,
         'rebate_days':            len(rebate_days),
@@ -2144,6 +2162,7 @@ class MessSMAView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # year/month are optional — defaults to today's semester
         today = dt.date.today()
         try:
             year  = int(request.query_params.get('year',  today.year))
@@ -2160,13 +2179,13 @@ class MessSMAView(APIView):
             if not is_admin:
                 return Response({'detail': 'Forbidden'}, status=403)
             try:
-                user = User.objects.get(pk=user_id)
+                target_user = User.objects.get(pk=user_id)
             except User.DoesNotExist:
                 return Response({'detail': 'User not found'}, status=404)
         else:
-            user = request.user
+            target_user = request.user
 
-        return Response(_compute_sma(user, year, month))
+        return Response(_compute_sma(target_user, year, month))
 
 
 # ---------------------------------------------------------------------------
@@ -2217,3 +2236,209 @@ class MessAnalyticsView(APIView):
             'rebate_approved':      rebate_approved,
             'meal_breakdown':       meal_breakdown,
         })
+
+
+# ===========================================================================
+# Admin Master Console  (is_staff only)
+# ===========================================================================
+
+class IsStaffUser(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.is_staff
+
+
+class ConsoleStatsView(APIView):
+    """Global platform statistics for the master console overview."""
+    permission_classes = [IsStaffUser]
+
+    def get(self, request):
+        today = dt.date.today()
+        return Response({
+            # Users
+            'total_users':        User.objects.count(),
+            'staff_users':        User.objects.filter(is_staff=True).count(),
+            'active_sessions':    User.objects.filter(is_active=True).count(),
+            'mess_admins':        MessAdminProfile.objects.count(),
+            'outlet_admins':      OutletAdmin.objects.count(),
+            # Mess
+            'total_menus':        DailyMenu.objects.count(),
+            'total_coupons':      GuestCouponPurchase.objects.count(),
+            'total_rebates':      RebateRequest.objects.count(),
+            'pending_rebates':    RebateRequest.objects.filter(status='PENDING').count(),
+            'approved_rebates':   RebateRequest.objects.filter(status='APPROVED').count(),
+            # Other modules
+            'total_food_orders':  FoodOrder.objects.count(),
+            'total_help':         HelpRequest.objects.count(),
+            'total_lf':           LFItem.objects.count(),
+            # Today summary
+            'coupons_today':      GuestCouponPurchase.objects.filter(date=today).count(),
+            'menus_today':        DailyMenu.objects.filter(date=today).count(),
+        })
+
+
+class ConsoleUserViewSet(viewsets.ViewSet):
+    """Staff-only CRUD for user accounts."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = User.objects.all().order_by('username')
+        q = (request.query_params.get('search') or request.query_params.get('q', '')).strip()
+        if q:
+            qs = qs.filter(
+                Q(username__icontains=q) | Q(email__icontains=q) |
+                Q(full_name__icontains=q) | Q(roll_number__icontains=q)
+            )
+        hostel = request.query_params.get('hostel')
+        if hostel:
+            qs = qs.filter(hostel=hostel)
+        return Response(AdminUserListSerializer(qs, many=True).data)
+
+    def retrieve(self, request, pk=None):
+        try:
+            user = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        return Response(AdminUserListSerializer(user).data)
+
+    def partial_update(self, request, pk=None):
+        try:
+            user = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = AdminUserUpdateSerializer(user, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        updated = ser.save()
+        return Response(AdminUserListSerializer(updated).data)
+
+
+class ConsoleMenuViewSet(viewsets.ViewSet):
+    """Staff-only: list all daily menus (with filters) and delete entries."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = DailyMenu.objects.select_related('updated_by').order_by('-date', 'hostel', 'meal_type')
+        hostel   = request.query_params.get('hostel')
+        date_str = request.query_params.get('date')
+        if hostel:
+            qs = qs.filter(hostel=hostel)
+        if date_str:
+            try:
+                qs = qs.filter(date=dt.date.fromisoformat(date_str))
+            except ValueError:
+                pass
+        return Response(DailyMenuSerializer(qs, many=True).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            obj = DailyMenu.objects.get(pk=pk)
+        except DailyMenu.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        obj.delete()
+        return Response(status=204)
+
+
+class ConsoleCouponViewSet(viewsets.ViewSet):
+    """Staff-only: view and delete guest coupon purchases."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = GuestCouponPurchase.objects.select_related('student').order_by('-purchased_at')
+        hostel   = request.query_params.get('hostel')
+        date_str = request.query_params.get('date')
+        q        = request.query_params.get('q', '').strip()
+        if hostel:
+            qs = qs.filter(hostel=hostel)
+        if date_str:
+            try:
+                qs = qs.filter(date=dt.date.fromisoformat(date_str))
+            except ValueError:
+                pass
+        if q:
+            qs = qs.filter(
+                Q(student__username__icontains=q) |
+                Q(roll_number__icontains=q) |
+                Q(room_number__icontains=q)
+            )
+        return Response(GuestCouponReadSerializer(qs, many=True).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            obj = GuestCouponPurchase.objects.get(pk=pk)
+        except GuestCouponPurchase.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        obj.delete()
+        return Response(status=204)
+
+
+class ConsoleRebateViewSet(viewsets.ViewSet):
+    """Staff-only: view, approve/reject, and delete rebate requests."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = RebateRequest.objects.select_related('student', 'reviewed_by').order_by('-created_at')
+        status_f = request.query_params.get('status')
+        hostel   = request.query_params.get('hostel')
+        q        = request.query_params.get('q', '').strip()
+        if status_f:
+            qs = qs.filter(status=status_f.upper())
+        if hostel:
+            qs = qs.filter(hostel=hostel)
+        if q:
+            qs = qs.filter(
+                Q(student__username__icontains=q) |
+                Q(student__full_name__icontains=q) |
+                Q(student__roll_number__icontains=q)
+            )
+        return Response(RebateRequestSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def review(self, request, pk=None):
+        try:
+            rebate = RebateRequest.objects.get(pk=pk)
+        except RebateRequest.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        if rebate.status != 'PENDING':
+            return Response({'detail': f'Already {rebate.status}'}, status=400)
+        rev_ser = RebateReviewSerializer(data=request.data)
+        rev_ser.is_valid(raise_exception=True)
+        vd = rev_ser.validated_data
+        rebate.status      = vd['status']
+        rebate.admin_note  = vd.get('admin_note', '')
+        rebate.reviewed_by = request.user
+        rebate.reviewed_at = timezone.now()
+        rebate.save(update_fields=['status', 'admin_note', 'reviewed_by', 'reviewed_at'])
+        return Response(RebateRequestSerializer(rebate).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            obj = RebateRequest.objects.get(pk=pk)
+        except RebateRequest.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        obj.delete()
+        return Response(status=204)
+
+
+class ConsoleSettingsViewSet(viewsets.ViewSet):
+    """Staff-only: list and update all hostel mess settings."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        # Return settings for all hostels, auto-create missing ones
+        from .models import MESS_HOSTEL_CHOICES
+        result = []
+        for key, label in MESS_HOSTEL_CHOICES:
+            obj, _ = MessHostelSettings.objects.get_or_create(hostel=key)
+            data = MessHostelSettingsSerializer(obj).data
+            data['hostel_label'] = label
+            result.append(data)
+        return Response(result)
+
+    def partial_update(self, request, pk=None):
+        try:
+            obj = MessHostelSettings.objects.get(pk=pk)
+        except MessHostelSettings.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = MessHostelSettingsSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data)
