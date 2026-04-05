@@ -11,25 +11,35 @@ export function AuthProvider({ children }) {
   // On mount, try to restore session from stored refresh token
   useEffect(() => {
     const savedRefresh = localStorage.getItem('refresh_token');
-    if (savedRefresh) {
+    if (!savedRefresh) {
+      setLoading(false);
+      return;
+    }
+
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Session restore timed out')), 12000)
+    );
+
+    Promise.race([
       api.post('/auth/refresh/', { refresh: savedRefresh })
         .then(res => {
           const newAccess = res.data.access;
           setAccessToken(newAccess);
-          // Fetch user profile
+          // SimpleJWT rotates the refresh token on every use — always persist
+          // the new one so the next hard-refresh doesn't use a consumed token.
+          if (res.data.refresh) localStorage.setItem('refresh_token', res.data.refresh);
           return api.get('/auth/me/', {
             headers: { Authorization: `Bearer ${newAccess}` },
           });
         })
-        .then(res => setUser(res.data))
-        .catch(() => {
-          // Refresh token invalid/expired — clear storage
-          localStorage.removeItem('refresh_token');
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+        .then(res => setUser(res.data)),
+      timeout,
+    ])
+      .catch(() => {
+        // Refresh token invalid/expired/timed out — clear storage
+        localStorage.removeItem('refresh_token');
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (credentials) => {

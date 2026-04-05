@@ -315,7 +315,7 @@ function MenusTab() {
                 <Td>{m.date}</Td>
                 <Td><Pill label={m.meal_type} color="blue" /></Td>
                 <Td style={{ maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {(m.items || []).join(', ') || '—'}
+                  {m.items || '—'}
                 </Td>
                 <Td>{m.created_by_username || '—'}</Td>
                 <Td>

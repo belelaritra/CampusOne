@@ -5,6 +5,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 10000, // 10s — prevents requests from hanging indefinitely
 });
 
 // ---------------------------------------------------------------------------
@@ -43,7 +44,13 @@ api.interceptors.response.use(
   res => res,
   async err => {
     const originalReq = err.config;
-    if (err.response?.status === 401 && !originalReq._retry) {
+
+    // Never intercept the refresh endpoint itself — retrying it causes a
+    // deadlock: the inner refresh also 401s → queued waiting for the outer
+    // refresh → outer refresh waiting for inner → setLoading(false) never runs.
+    const isRefreshEndpoint = originalReq.url?.includes('/auth/refresh/');
+
+    if (err.response?.status === 401 && !originalReq._retry && !isRefreshEndpoint) {
       if (_isRefreshing) {
         return new Promise((resolve, reject) => {
           _failedQueue.push({ resolve, reject });
@@ -64,9 +71,9 @@ api.interceptors.response.use(
         return api(originalReq);
       } catch (refreshErr) {
         processQueue(refreshErr, null);
-        // Redirect to login
         localStorage.removeItem('refresh_token');
-        window.location.href = '/login';
+        // Use React Router navigation instead of hard redirect so the app
+        // tears down cleanly. Fall through — AuthContext .catch() handles logout.
         return Promise.reject(refreshErr);
       } finally {
         _isRefreshing = false;
