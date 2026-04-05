@@ -2100,13 +2100,14 @@ class RebateViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
-        """Admin: see all pending/all for their hostel. Student: own requests."""
+        """Admin: see all requests for their hostel (by student's hostel). Student: own requests."""
         is_admin = request.user.is_staff or MessAdminProfile.objects.filter(user=request.user).exists()
         if is_admin:
             admin_h = _get_admin_hostel(request.user)
             qs = RebateRequest.objects.select_related('student', 'reviewed_by')
             if admin_h:
-                qs = qs.filter(hostel=admin_h)
+                # Match by student's current hostel — robust to old hostel-field values
+                qs = qs.filter(student__hostel=admin_h)
             status_filter = request.query_params.get('status')
             if status_filter:
                 qs = qs.filter(status=status_filter.upper())
@@ -2126,12 +2127,13 @@ class RebateViewSet(viewsets.ViewSet):
     def review(self, request, pk=None):
         """Admin approves or rejects a rebate request."""
         try:
-            rebate = RebateRequest.objects.get(pk=pk)
+            rebate = RebateRequest.objects.select_related('student').get(pk=pk)
         except RebateRequest.DoesNotExist:
             return Response({'detail': 'Not found'}, status=404)
 
+        # Check the mess admin manages this student's hostel
         admin_h = _get_admin_hostel(request.user)
-        if admin_h and rebate.hostel != admin_h:
+        if admin_h and rebate.student.hostel != admin_h:
             return Response({'detail': 'Cannot manage other hostels'}, status=403)
 
         if rebate.status != RebateRequest.STATUS_PENDING:

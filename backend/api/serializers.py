@@ -63,7 +63,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'phone', 'full_name',
             'phone_number', 'roll_number', 'hostel', 'room_number', 'points',
-            'is_outlet_admin', 'outlet_id', 'outlet_name',
+            'is_staff', 'is_outlet_admin', 'outlet_id', 'outlet_name',
             'is_security', 'is_mess_admin', 'mess_admin_hostel',
         ]
         read_only_fields = fields
