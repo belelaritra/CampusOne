@@ -157,40 +157,101 @@ function MealCard({ meal }) {
 
 // ── Menu ────────────────────────────────────────────────────────────────────
 function StudentMenuTab({ userHostel }) {
-  const [hostel,  setHostel]  = useState(userHostel || 'hostel_1');
-  const [menu,    setMenu]    = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [msg,     setMsg]     = useState('');
+  // viewHostel = null means "show my hostel"; non-null = user picked another hostel
+  const [viewHostel, setViewHostel] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [menu,       setMenu]       = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [msg,        setMsg]        = useState('');
+
+  const activeHostel = viewHostel || userHostel || 'hostel_1';
+  const isOwnHostel  = !viewHostel && !!userHostel;
+
+  // Reset to own hostel when userHostel prop changes (e.g. after profile update)
+  useEffect(() => { setViewHostel(null); }, [userHostel]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setMenu(await getMessMenu(hostel, todayStr())); }
+    try { setMenu(await getMessMenu(activeHostel, todayStr())); }
     catch { setMsg('❌ Failed to load menu.'); }
     finally { setLoading(false); }
-  }, [hostel]);
+  }, [activeHostel]);
   useEffect(() => { load(); }, [load]);
 
   return (
     <div>
       <Banner msg={msg} onClose={() => setMsg('')} />
 
-      {/* Date + hostel selector row */}
       <SectionCard>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.75rem' }}>
+        {/* Top row: date + refresh */}
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexWrap:'wrap', gap:'0.75rem', marginBottom:'0.85rem' }}>
           <div>
-            <div style={{ fontFamily:'var(--font-heading)', fontSize:'1.1rem', fontWeight:700, color:'var(--iitb-blue-primary)' }}>
+            <div style={{ fontFamily:'var(--font-heading)', fontSize:'1.05rem', fontWeight:700, color:'var(--iitb-blue-primary)' }}>
               📅 {todayLabel()}
             </div>
             <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginTop:'0.1rem' }}>Today's mess menu</div>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
-            <FieldLabel>Hostel</FieldLabel>
-            <select value={hostel} onChange={e => setHostel(e.target.value)}
-              className="search-input" style={{ fontSize:'0.875rem', padding:'0.4rem 0.75rem' }}>
-              {MESS_HOSTELS.map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-            <button className="btn btn-secondary" onClick={load} style={{ padding:'0.4rem 0.75rem', fontSize:'0.82rem' }}>🔄</button>
+          <button className="btn btn-secondary" onClick={load} style={{ padding:'0.35rem 0.75rem', fontSize:'0.82rem' }}>🔄 Refresh</button>
+        </div>
+
+        {/* Hostel badge row */}
+        <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', flexWrap:'wrap' }}>
+          {/* Showing badge */}
+          <div style={{
+            display:'flex', alignItems:'center', gap:'0.4rem',
+            background:'rgba(0,61,130,0.08)', borderRadius:999,
+            padding:'0.3rem 0.85rem', fontSize:'0.82rem',
+          }}>
+            <span>🏠</span>
+            <span style={{ fontWeight:600, color:'var(--iitb-blue-primary)' }}>
+              {HOSTEL_LABEL[activeHostel] || activeHostel}
+            </span>
+            {isOwnHostel && (
+              <span style={{ fontSize:'0.7rem', background:'#dcfce7', color:'#166534', padding:'0.05rem 0.4rem', borderRadius:999, marginLeft:'0.2rem' }}>
+                Your hostel
+              </span>
+            )}
           </div>
+
+          {/* Toggle other hostel picker */}
+          {userHostel && !showPicker && (
+            <button className="btn" onClick={() => setShowPicker(true)}
+              style={{ fontSize:'0.78rem', padding:'0.28rem 0.75rem', color:'var(--iitb-blue-primary)', border:'1px solid rgba(0,61,130,0.25)' }}>
+              View another hostel ▾
+            </button>
+          )}
+          {!userHostel && !showPicker && (
+            <button className="btn" onClick={() => setShowPicker(true)}
+              style={{ fontSize:'0.78rem', padding:'0.28rem 0.75rem' }}>
+              Select hostel ▾
+            </button>
+          )}
+
+          {/* Inline picker when open */}
+          {showPicker && (
+            <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
+              <select className="search-input" value={viewHostel || activeHostel}
+                onChange={e => { setViewHostel(e.target.value === userHostel ? null : e.target.value); setShowPicker(false); }}
+                style={{ fontSize:'0.82rem', padding:'0.3rem 0.65rem' }}
+                autoFocus
+                onBlur={() => setShowPicker(false)}>
+                {userHostel && (
+                  <option value={userHostel}>🏠 {HOSTEL_LABEL[userHostel]||userHostel} (Your hostel)</option>
+                )}
+                {MESS_HOSTELS.filter(([k]) => k !== userHostel).map(([k,v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Back to my hostel button */}
+          {viewHostel && userHostel && (
+            <button className="btn btn-secondary" onClick={() => { setViewHostel(null); setShowPicker(false); }}
+              style={{ fontSize:'0.78rem', padding:'0.28rem 0.75rem' }}>
+              ← Back to my hostel
+            </button>
+          )}
         </div>
       </SectionCard>
 
