@@ -65,28 +65,28 @@ export default function Sidebar() {
       <div className="sidebar-footer">
         {/* Clickable profile card navigates to /profile */}
         <NavLink to="/profile" className="user-profile" style={{ textDecoration: 'none', cursor: 'pointer' }}>
-          <div className="user-avatar" style={{
-            background: 'var(--iitb-blue-primary, #003366)',
-            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            borderRadius: '50%', width: 36, height: 36, fontWeight: 700, fontSize: '1rem',
-          }}>
-            {user?.username?.[0]?.toUpperCase() || '?'}
+          <div className="user-avatar" style={{ flexShrink: 0, overflow: 'hidden' }}>
+            {user?.photo_url
+              ? <img src={user.photo_url} alt={user.username}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+              : <span style={{
+                  width: '100%', height: '100%', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 700, fontSize: '1.3rem', color: '#fff',
+                }}>
+                  {user?.username?.[0]?.toUpperCase() || '?'}
+                </span>
+            }
           </div>
           <div className="user-info">
             <p className="user-name">{user?.username || 'User'}</p>
             <p className="user-roll">⭐ {user?.points ?? 0} pts</p>
           </div>
         </NavLink>
-        <button
-          onClick={handleLogout}
-          title="Sign out"
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: '1.1rem', padding: '0.25rem 0.5rem',
-            color: 'var(--text-secondary)', marginLeft: '0.25rem',
-          }}
-        >
-          🚪
+
+        <button onClick={handleLogout} className="sidebar-logout-btn" title="Sign out">
+          <span>⏻</span>
+          <span>Sign Out</span>
         </button>
       </div>
     </aside>
