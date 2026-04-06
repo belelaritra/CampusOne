@@ -141,14 +141,16 @@ class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserProfileSerializer(request.user).data)
+        return Response(UserProfileSerializer(request.user, context={'request': request}).data)
 
     def patch(self, request):
-        serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+        serializer = UserProfileUpdateSerializer(
+            request.user, data=request.data, partial=True
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         request.user.refresh_from_db()
-        return Response(UserProfileSerializer(request.user).data)
+        return Response(UserProfileSerializer(request.user, context={'request': request}).data)
 
 
 class ChangePasswordView(APIView):

@@ -7,6 +7,15 @@ from django.utils import timezone
 # Custom User
 # ---------------------------------------------------------------------------
 
+DEGREE_CHOICES = [
+    ('BTech', 'B.Tech'),
+    ('MTech', 'M.Tech'),
+    ('MS',    'M.S. (Research)'),
+    ('MSc',   'M.Sc'),
+    ('PhD',   'Ph.D'),
+    ('Other', 'Other'),
+]
+
 class User(AbstractUser):
     """Extends AbstractUser with phone number and help-points tracking."""
     phone = models.CharField(max_length=15, blank=True)          # legacy
@@ -15,8 +24,13 @@ class User(AbstractUser):
     roll_number  = models.CharField(max_length=20,  blank=True)
     hostel       = models.CharField(max_length=30,  blank=True)  # e.g. 'hostel_1'
     room_number  = models.CharField(max_length=20,  blank=True)
-    points      = models.PositiveIntegerField(default=0)
-    is_security = models.BooleanField(default=False)
+    points       = models.PositiveIntegerField(default=0)
+    is_security  = models.BooleanField(default=False)
+    # Academic profile
+    degree        = models.CharField(max_length=10, choices=DEGREE_CHOICES, blank=True)
+    course        = models.CharField(max_length=100, blank=True)   # e.g. 'Computer Science'
+    year_of_study = models.PositiveSmallIntegerField(null=True, blank=True)  # 1–6
+    photo         = models.ImageField(upload_to='profile_photos/', null=True, blank=True)
 
     def __str__(self):
         return self.username

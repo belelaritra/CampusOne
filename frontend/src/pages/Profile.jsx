@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { SectionHeader } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { changePassword, updateProfile } from '../services/api';
+import api from '../services/api';
 
 // Keys must match backend MESS_HOSTEL_KEYS (hostel_1 format)
 const HOSTEL_OPTIONS = [
@@ -19,8 +20,28 @@ const HOSTEL_OPTIONS = [
   { key: 'tansa_house', label: 'Tansa House' },
 ];
 
+const DEGREE_OPTIONS = [
+  { key: '',      label: '— Select degree —' },
+  { key: 'BTech', label: 'B.Tech' },
+  { key: 'MTech', label: 'M.Tech' },
+  { key: 'MS',    label: 'M.S. (Research)' },
+  { key: 'MSc',   label: 'M.Sc' },
+  { key: 'PhD',   label: 'Ph.D' },
+  { key: 'Other', label: 'Other' },
+];
+
+const HOSTEL_LABEL = Object.fromEntries(HOSTEL_OPTIONS.filter(h => h.key).map(h => [h.key, h.label]));
+
+function ordinal(n) {
+  if (!n) return null;
+  const s = ['th','st','nd','rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]) + ' Year';
+}
+
 export default function Profile() {
   const { user, logout, updateUser } = useAuth();
+  const photoInputRef = useRef(null);
 
   /* ---------- profile edit state ---------- */
   const [prof, setProf] = useState({
@@ -30,7 +51,12 @@ export default function Profile() {
     roll_number:  user?.roll_number  || '',
     hostel:       user?.hostel       || '',
     room_number:  user?.room_number  || '',
+    degree:       user?.degree       || '',
+    course:       user?.course       || '',
+    year_of_study: user?.year_of_study || '',
   });
+  const [photoFile,  setPhotoFile]  = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(user?.photo_url || null);
   const [profErr,  setProfErr]  = useState('');
   const [profOk,   setProfOk]   = useState('');
   const [profBusy, setProfBusy] = useState(false);
@@ -46,6 +72,13 @@ export default function Profile() {
   const handleProf = e => setProf(p => ({ ...p, [e.target.name]: e.target.value }));
   const handlePw   = e => setPw(p => ({ ...p, [e.target.name]: e.target.value }));
 
+  function handlePhotoChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
   async function submitProfile(e) {
     e.preventDefault();
     setProfErr(''); setProfOk('');
@@ -53,10 +86,20 @@ export default function Profile() {
     if (!prof.roll_number.trim()) return setProfErr('Roll number is required.');
     setProfBusy(true);
     try {
-      const updated = await updateProfile(prof);
-      updateUser(updated);
+      // Use FormData so photo (binary) can be sent alongside text fields
+      const fd = new FormData();
+      Object.entries(prof).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) fd.append(k, v);
+      });
+      if (photoFile) fd.append('photo', photoFile);
+
+      const { data } = await api.patch('/auth/me/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      updateUser(data);
       setProfOk('Profile updated successfully!');
       setEditing(false);
+      setPhotoFile(null);
     } catch (err) {
       const data = err.response?.data;
       const msg = data?.email?.[0] || data?.detail || Object.values(data || {})?.[0]?.[0] || 'Failed to update profile.';
@@ -83,6 +126,10 @@ export default function Profile() {
     }
   }
 
+  /* ---------- avatar ---------- */
+  const avatarUrl = photoPreview || user?.photo_url;
+  const avatarInitial = (user?.full_name || user?.username || '?')[0].toUpperCase();
+
   /* ---------- render ---------- */
   return (
     <section className="content-section active">
@@ -91,32 +138,38 @@ export default function Profile() {
       {/* ── Avatar + summary card ─────────────────────────────── */}
       <div className="request-card" style={{ maxWidth: 560, marginBottom: '2rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--iitb-blue-primary,#003D82), #0066cc)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '1.6rem', color: '#fff', fontWeight: 700, flexShrink: 0,
-            boxShadow: '0 4px 12px rgba(0,61,130,0.25)',
-          }}>
-            {(user?.full_name || user?.username || '?')[0].toUpperCase()}
+          {/* Avatar */}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            {avatarUrl
+              ? <img src={avatarUrl} alt="profile"
+                  style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover',
+                    border: '2px solid var(--iitb-blue-primary,#003D82)',
+                    boxShadow: '0 4px 12px rgba(0,61,130,0.25)' }} />
+              : <div style={{
+                  width: 64, height: 64, borderRadius: '50%',
+                  background: 'linear-gradient(135deg, var(--iitb-blue-primary,#003D82), #0066cc)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '1.6rem', color: '#fff', fontWeight: 700,
+                  boxShadow: '0 4px 12px rgba(0,61,130,0.25)',
+                }}>{avatarInitial}</div>
+            }
           </div>
+
           <div style={{ flex: 1, minWidth: 0 }}>
             <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{user?.full_name || user?.username}</h3>
             <p style={{ margin: '0.1rem 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
               {user?.email || <em>No email set</em>}
             </p>
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.3rem', flexWrap: 'wrap' }}>
-              {user?.roll_number && (
-                <span style={chipStyle}>🎓 {user.roll_number}</span>
-              )}
-              {user?.hostel && (
-                <span style={chipStyle}>🏠 {user.hostel}{user?.room_number ? ` / ${user.room_number}` : ''}</span>
-              )}
-              {user?.phone_number && (
-                <span style={chipStyle}>📞 {user.phone_number}</span>
-              )}
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+              {user?.roll_number  && <span style={chipStyle}>🎓 {user.roll_number}</span>}
+              {user?.degree       && <span style={chipStyle}>{user.degree}</span>}
+              {user?.course       && <span style={chipStyle}>📚 {user.course}</span>}
+              {user?.year_of_study && <span style={chipStyle}>{ordinal(user.year_of_study)}</span>}
+              {user?.hostel       && <span style={chipStyle}>🏠 {HOSTEL_LABEL[user.hostel] || user.hostel}{user?.room_number ? ` / ${user.room_number}` : ''}</span>}
+              {user?.phone_number && <span style={chipStyle}>📞 {user.phone_number}</span>}
             </div>
           </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
             <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--iitb-blue-primary,#003D82)' }}>
               {user?.points ?? 0}
@@ -132,7 +185,23 @@ export default function Profile() {
           <h3 style={{ margin: 0 }}>Personal Information</h3>
           {!editing && (
             <button className="btn btn-primary" style={{ padding: '0.35rem 1rem', fontSize: '0.85rem' }}
-              onClick={() => { setProfErr(''); setProfOk(''); setEditing(true); }}>
+              onClick={() => {
+                setProfErr(''); setProfOk('');
+                setProf({
+                  full_name:    user?.full_name    || '',
+                  email:        user?.email        || '',
+                  phone_number: user?.phone_number || '',
+                  roll_number:  user?.roll_number  || '',
+                  hostel:       user?.hostel       || '',
+                  room_number:  user?.room_number  || '',
+                  degree:       user?.degree       || '',
+                  course:       user?.course       || '',
+                  year_of_study: user?.year_of_study || '',
+                });
+                setPhotoPreview(user?.photo_url || null);
+                setPhotoFile(null);
+                setEditing(true);
+              }}>
               Edit
             </button>
           )}
@@ -143,6 +212,31 @@ export default function Profile() {
 
         {editing ? (
           <form onSubmit={submitProfile} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* Photo upload */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              {photoPreview || user?.photo_url
+                ? <img src={photoPreview || user?.photo_url} alt="preview"
+                    style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover',
+                      border: '2px solid var(--iitb-blue-primary,#003D82)' }} />
+                : <div style={{
+                    width: 56, height: 56, borderRadius: '50%',
+                    background: 'linear-gradient(135deg, var(--iitb-blue-primary,#003D82), #0066cc)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.4rem', color: '#fff', fontWeight: 700,
+                  }}>{avatarInitial}</div>
+              }
+              <div>
+                <input type="file" accept="image/*" ref={photoInputRef} style={{ display: 'none' }}
+                  onChange={handlePhotoChange} />
+                <button type="button" className="btn" style={{ fontSize: '0.82rem', padding: '0.3rem 0.8rem' }}
+                  onClick={() => photoInputRef.current.click()}>
+                  {photoPreview ? 'Change Photo' : 'Upload Photo'}
+                </button>
+                {photoFile && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>{photoFile.name}</span>}
+              </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div className="form-group" style={{ gridColumn: '1/-1' }}>
                 <label>Full Name <span style={{ color: '#dc2626' }}>*</span></label>
@@ -165,6 +259,26 @@ export default function Profile() {
                   value={prof.roll_number} onChange={handleProf} required />
               </div>
               <div className="form-group">
+                <label>Degree</label>
+                <select name="degree" className="search-input" value={prof.degree} onChange={handleProf}>
+                  {DEGREE_OPTIONS.map(({ key, label }) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ gridColumn: '1/-1' }}>
+                <label>Course / Branch</label>
+                <input name="course" className="search-input" placeholder="e.g. Computer Science and Engineering"
+                  value={prof.course} onChange={handleProf} />
+              </div>
+              <div className="form-group">
+                <label>Year of Study</label>
+                <select name="year_of_study" className="search-input" value={prof.year_of_study} onChange={handleProf}>
+                  <option value="">— Select year —</option>
+                  {[1,2,3,4,5,6].map(y => <option key={y} value={y}>{y}{['st','nd','rd','th','th','th'][y-1]} Year</option>)}
+                </select>
+              </div>
+              <div className="form-group">
                 <label>Hostel</label>
                 <select name="hostel" className="search-input" value={prof.hostel} onChange={handleProf}>
                   {HOSTEL_OPTIONS.map(({ key, label }) => (
@@ -184,30 +298,22 @@ export default function Profile() {
                 {profBusy ? 'Saving…' : 'Save Changes'}
               </button>
               <button type="button" className="btn" disabled={profBusy}
-                onClick={() => {
-                  setEditing(false);
-                  setProfErr(''); setProfOk('');
-                  setProf({
-                    full_name:    user?.full_name    || '',
-                    email:        user?.email        || '',
-                    phone_number: user?.phone_number || '',
-                    roll_number:  user?.roll_number  || '',
-                    hostel:       user?.hostel       || '',
-                    room_number:  user?.room_number  || '',
-                  });
-                }}>
+                onClick={() => { setEditing(false); setProfErr(''); setProfOk(''); }}>
                 Cancel
               </button>
             </div>
           </form>
         ) : (
           <div className="request-card" style={{ padding: '1rem 1.25rem' }}>
-            <InfoRow label="Full Name"    value={user?.full_name    || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} />
-            <InfoRow label="Email"        value={user?.email        || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} />
-            <InfoRow label="Phone"        value={user?.phone_number || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} />
-            <InfoRow label="Roll Number"  value={user?.roll_number  || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} />
-            <InfoRow label="Hostel"       value={user?.hostel       || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} />
-            <InfoRow label="Room Number"  value={user?.room_number  || <em style={{ color: 'var(--text-secondary)' }}>Not set</em>} last />
+            <InfoRow label="Full Name"    value={user?.full_name    || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Email"        value={user?.email        || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Phone"        value={user?.phone_number || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Roll Number"  value={user?.roll_number  || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Degree"       value={DEGREE_OPTIONS.find(d => d.key === user?.degree)?.label || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Course"       value={user?.course       || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Year"         value={user?.year_of_study ? ordinal(user.year_of_study) : <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Hostel"       value={HOSTEL_LABEL[user?.hostel] || user?.hostel || <em style={emStyle}>Not set</em>} />
+            <InfoRow label="Room Number"  value={user?.room_number  || <em style={emStyle}>Not set</em>} last />
           </div>
         )}
       </div>
@@ -259,6 +365,8 @@ const chipStyle = {
   borderRadius: 999,
   whiteSpace: 'nowrap',
 };
+
+const emStyle = { color: 'var(--text-secondary)' };
 
 function InfoRow({ label, value, last }) {
   return (

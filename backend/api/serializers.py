@@ -58,6 +58,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     outlet_name      = serializers.SerializerMethodField()
     is_mess_admin    = serializers.SerializerMethodField()
     mess_admin_hostel= serializers.SerializerMethodField()
+    photo_url        = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -66,8 +67,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'phone_number', 'roll_number', 'hostel', 'room_number', 'points',
             'is_staff', 'is_outlet_admin', 'outlet_id', 'outlet_name',
             'is_security', 'is_mess_admin', 'mess_admin_hostel',
+            'degree', 'course', 'year_of_study', 'photo_url',
         ]
         read_only_fields = fields
+
+    def get_photo_url(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
 
     def get_is_outlet_admin(self, obj):
         return OutletAdmin.objects.filter(user=obj).exists()
@@ -101,7 +111,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['full_name', 'email', 'phone_number', 'roll_number', 'hostel', 'room_number']
+        fields = [
+            'full_name', 'email', 'phone_number', 'roll_number',
+            'hostel', 'room_number',
+            'degree', 'course', 'year_of_study', 'photo',
+        ]
 
     def validate_email(self, value):
         if not value:
@@ -111,6 +125,11 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_year_of_study(self, value):
+        if value is not None and not (1 <= value <= 6):
+            raise serializers.ValidationError("Year must be between 1 and 6.")
         return value
 
 
