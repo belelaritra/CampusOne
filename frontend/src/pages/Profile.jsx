@@ -4,20 +4,19 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { changePassword, updateProfile } from '../services/api';
 import api from '../services/api';
 
-// Keys must match backend MESS_HOSTEL_KEYS (hostel_1 format)
 const HOSTEL_OPTIONS = [
-  { key: '',           label: '— Select hostel —' },
-  { key: 'hostel_1',   label: 'Hostel 1'   }, { key: 'hostel_2',  label: 'Hostel 2'  },
-  { key: 'hostel_3',   label: 'Hostel 3'   }, { key: 'hostel_4',  label: 'Hostel 4'  },
-  { key: 'hostel_5',   label: 'Hostel 5'   }, { key: 'hostel_6',  label: 'Hostel 6'  },
-  { key: 'hostel_7',   label: 'Hostel 7'   }, { key: 'hostel_8',  label: 'Hostel 8'  },
-  { key: 'hostel_9',   label: 'Hostel 9'   }, { key: 'hostel_10', label: 'Hostel 10' },
-  { key: 'hostel_11',  label: 'Hostel 11'  }, { key: 'hostel_12', label: 'Hostel 12' },
-  { key: 'hostel_13',  label: 'Hostel 13'  }, { key: 'hostel_14', label: 'Hostel 14' },
-  { key: 'hostel_15',  label: 'Hostel 15'  }, { key: 'hostel_16', label: 'Hostel 16' },
-  { key: 'hostel_17',  label: 'Hostel 17'  }, { key: 'hostel_18', label: 'Hostel 18' },
-  { key: 'hostel_19',  label: 'Hostel 19'  }, { key: 'hostel_21', label: 'Hostel 21' },
-  { key: 'tansa_house', label: 'Tansa House' },
+  { key: '',       label: '— Select hostel —' },
+  { key: 'H1',     label: 'Hostel 1'   }, { key: 'H2',  label: 'Hostel 2'  },
+  { key: 'H3',     label: 'Hostel 3'   }, { key: 'H4',  label: 'Hostel 4'  },
+  { key: 'H5',     label: 'Hostel 5'   }, { key: 'H6',  label: 'Hostel 6'  },
+  { key: 'H7',     label: 'Hostel 7'   }, { key: 'H8',  label: 'Hostel 8'  },
+  { key: 'H9',     label: 'Hostel 9'   }, { key: 'H10', label: 'Hostel 10' },
+  { key: 'H11',    label: 'Hostel 11'  }, { key: 'H12', label: 'Hostel 12' },
+  { key: 'H13',    label: 'Hostel 13'  }, { key: 'H14', label: 'Hostel 14' },
+  { key: 'H15',    label: 'Hostel 15'  }, { key: 'H16', label: 'Hostel 16' },
+  { key: 'H17',    label: 'Hostel 17'  }, { key: 'H18', label: 'Hostel 18' },
+  { key: 'H19',    label: 'Hostel 19'  }, { key: 'H21', label: 'Hostel 21' },
+  { key: 'Tansa',  label: 'Tansa House' },
 ];
 
 const DEGREE_OPTIONS = [

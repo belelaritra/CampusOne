@@ -4,13 +4,13 @@ import { dashboardCards } from '../data/mockData.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const HOSTEL_LABEL = {
-  hostel_1:'Hostel 1', hostel_2:'Hostel 2', hostel_3:'Hostel 3',
-  hostel_4:'Hostel 4', hostel_5:'Hostel 5', hostel_6:'Hostel 6',
-  hostel_7:'Hostel 7', hostel_8:'Hostel 8', hostel_9:'Hostel 9',
-  hostel_10:'Hostel 10', hostel_11:'Hostel 11', hostel_12:'Hostel 12',
-  hostel_13:'Hostel 13', hostel_14:'Hostel 14', hostel_15:'Hostel 15',
-  hostel_16:'Hostel 16', hostel_17:'Hostel 17', hostel_18:'Hostel 18',
-  hostel_19:'Hostel 19', hostel_21:'Hostel 21', tansa_house:'Tansa House',
+  H1:'Hostel 1',  H2:'Hostel 2',  H3:'Hostel 3',
+  H4:'Hostel 4',  H5:'Hostel 5',  H6:'Hostel 6',
+  H7:'Hostel 7',  H8:'Hostel 8',  H9:'Hostel 9',
+  H10:'Hostel 10', H11:'Hostel 11', H12:'Hostel 12',
+  H13:'Hostel 13', H14:'Hostel 14', H15:'Hostel 15',
+  H16:'Hostel 16', H17:'Hostel 17', H18:'Hostel 18',
+  H19:'Hostel 19', H21:'Hostel 21', Tansa:'Tansa House',
 };
 
 function ordinal(n) {

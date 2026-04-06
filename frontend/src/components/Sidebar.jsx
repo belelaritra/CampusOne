@@ -2,20 +2,13 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const NAV_ITEMS = [
-  { to: '/',           icon: '📊', label: 'Dashboard' },
-  { to: '/hostels',    icon: '🏠', label: 'Hostels' },
-  { to: '/mess',       icon: '🍱', label: 'Mess' },
-  { to: '/food',       icon: '🍕', label: 'Food Ordering' },
-  { to: '/map',        icon: '🗺️', label: 'Campus Map' },
-  { to: '/help',       icon: '🤝', label: 'Help & Delivery' },
-  { to: '/groups',     icon: '👥', label: 'Groups' },
-  { to: '/courses',    icon: '📚', label: 'Courses & Chat' },
-  { to: '/hospital',   icon: '🏥', label: 'Hospital' },
-  { to: '/buggy',      icon: '🚌', label: 'Buggy Pass' },
-  { to: '/lostfound',  icon: '🔍', label: 'Lost & Found' },
-  { to: '/contacts',   icon: '📞', label: 'Contacts' },
-  { to: '/marketplace',icon: '🛍️', label: 'Marketplace' },
-  { to: '/events',     icon: '📅', label: 'Events' },
+  { to: '/',          icon: '📊', label: 'Dashboard' },
+  { to: '/mess',      icon: '🍱', label: 'Mess' },
+  { to: '/food',      icon: '🍕', label: 'Food Ordering' },
+  { to: '/help',      icon: '🤝', label: 'Help & Delivery' },
+  { to: '/hospital',  icon: '🏥', label: 'Hospital' },
+  { to: '/lostfound', icon: '🔍', label: 'Lost & Found' },
+  { to: '/contacts',  icon: '📞', label: 'Contacts' },
 ];
 
 export default function Sidebar() {

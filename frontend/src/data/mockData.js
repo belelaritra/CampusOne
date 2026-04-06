@@ -141,16 +141,10 @@ export const events = [
 ];
 
 export const dashboardCards = [
-  { id: 'hostels', icon: '🏠', title: 'Hostels & Mess', desc: 'View mess menu & hostel info', path: '/hostels', color: '#003D82' },
-  { id: 'food', icon: '🍕', title: 'Food Ordering', desc: 'Order from campus outlets', path: '/food', color: '#0055B8' },
-  { id: 'map', icon: '🗺️', title: 'Campus Map', desc: 'Find buildings & navigate', path: '/map', color: '#7C3AED' },
-  { id: 'help', icon: '🤝', title: 'Help & Delivery', desc: 'Earn rewards helping peers', path: '/help', color: '#059669' },
-  { id: 'groups', icon: '👥', title: 'Groups', desc: 'Discover clubs & communities', path: '/groups', color: '#DC2626' },
-  { id: 'courses', icon: '📚', title: 'Courses & Chat', desc: 'Course discussions & chat', path: '/courses', color: '#D97706' },
-  { id: 'hospital', icon: '🏥', title: 'Hospital', desc: 'Doctors & medical services', path: '/hospital', color: '#0891B2' },
-  { id: 'buggy', icon: '🚌', title: 'Buggy Pass', desc: 'Digital pass & recharge', path: '/buggy', color: '#7C3AED' },
-  { id: 'lostfound', icon: '🔍', title: 'Lost & Found', desc: 'Report or find lost items', path: '/lostfound', color: '#B45309' },
-  { id: 'contacts', icon: '📞', title: 'Contacts', desc: 'Students, faculty & dept contacts', path: '/contacts', color: '#065F46' },
-  { id: 'marketplace', icon: '🛍️', title: 'Marketplace', desc: 'Buy & sell on campus', path: '/marketplace', color: '#9D174D' },
-  { id: 'events', icon: '📅', title: 'Events', desc: 'Campus events & calendar', path: '/events', color: '#1E40AF' },
+  { id: 'mess',      icon: '🍱', title: 'Mess',            desc: 'Daily menu & mess services',   path: '/mess',      color: '#003D82' },
+  { id: 'food',      icon: '🍕', title: 'Food Ordering',   desc: 'Order from campus outlets',    path: '/food',      color: '#0055B8' },
+  { id: 'help',      icon: '🤝', title: 'Help & Delivery', desc: 'Earn rewards helping peers',   path: '/help',      color: '#059669' },
+  { id: 'hospital',  icon: '🏥', title: 'Hospital',        desc: 'Doctors & medical services',   path: '/hospital',  color: '#0891B2' },
+  { id: 'lostfound', icon: '🔍', title: 'Lost & Found',    desc: 'Report or find lost items',    path: '/lostfound', color: '#B45309' },
+  { id: 'contacts',  icon: '📞', title: 'Contacts',        desc: 'Faculty & department contacts', path: '/contacts',  color: '#065F46' },
 ];
