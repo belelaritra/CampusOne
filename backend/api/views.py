@@ -14,6 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
 import datetime as dt
+import re
 
 from .models import (
     User, HelpRequest, PasswordResetToken,
@@ -1821,6 +1822,39 @@ def _get_admin_hostel(user):
         return None
 
 
+def _normalize_to_mess_key(hostel_raw):
+    """
+    Normalize any hostel string to mess-key format (used by MessAdminProfile).
+    Handles both profile format ('H14', 'Tansa') and mess-key format ('hostel_14',
+    'tansa_house') so comparisons work regardless of which format was stored.
+    """
+    if not hostel_raw:
+        return ''
+    if hostel_raw in ('Tansa', 'tansa_house'):
+        return 'tansa_house'
+    # Profile format: H1 … H21
+    m = re.match(r'^H(\d+)$', hostel_raw, re.IGNORECASE)
+    if m:
+        return f'hostel_{m.group(1)}'
+    # Already mess-key format: hostel_1 … hostel_21
+    if re.match(r'^hostel_\d+$', hostel_raw):
+        return hostel_raw
+    return hostel_raw  # unknown format — return as-is
+
+
+def _mess_key_to_profile(mess_key):
+    """
+    Convert mess-key format ('hostel_14') to profile format ('H14') so we can
+    match against User.hostel which may have been saved in either format.
+    """
+    if mess_key == 'tansa_house':
+        return 'Tansa'
+    m = re.match(r'^hostel_(\d+)$', mess_key)
+    if m:
+        return f'H{m.group(1)}'
+    return mess_key
+
+
 def _current_semester(ref_date):
     """Return (semester_start, semester_end, label) for the given date."""
     y = ref_date.year
@@ -2106,8 +2140,12 @@ class RebateViewSet(viewsets.ViewSet):
             admin_h = _get_admin_hostel(request.user)
             qs = RebateRequest.objects.select_related('student', 'reviewed_by')
             if admin_h:
-                # Match by student's current hostel — robust to old hostel-field values
-                qs = qs.filter(student__hostel=admin_h)
+                # User.hostel may be stored in either 'hostel_14' or 'H14' format
+                # depending on how the profile was last saved — match both.
+                profile_h = _mess_key_to_profile(admin_h)
+                qs = qs.filter(
+                    Q(student__hostel=admin_h) | Q(student__hostel=profile_h)
+                )
             status_filter = request.query_params.get('status')
             if status_filter:
                 qs = qs.filter(status=status_filter.upper())
@@ -2131,9 +2169,11 @@ class RebateViewSet(viewsets.ViewSet):
         except RebateRequest.DoesNotExist:
             return Response({'detail': 'Not found'}, status=404)
 
-        # Check the mess admin manages this student's hostel
+        # Check the mess admin manages this student's hostel.
+        # Normalize both values to mess-key format before comparing because
+        # User.hostel may be stored as 'H14' while admin_h is 'hostel_14'.
         admin_h = _get_admin_hostel(request.user)
-        if admin_h and rebate.student.hostel != admin_h:
+        if admin_h and _normalize_to_mess_key(rebate.student.hostel) != admin_h:
             return Response({'detail': 'Cannot manage other hostels'}, status=403)
 
         if rebate.status != RebateRequest.STATUS_PENDING:
@@ -2214,7 +2254,12 @@ class MessAnalyticsView(APIView):
             created_at__year=year, created_at__month=month
         )
         if admin_h:
-            rebate_qs = rebate_qs.filter(hostel=admin_h)
+            # RebateRequest.hostel may be stored in either format ('H14' or 'hostel_14')
+            # depending on when the record was created — match both.
+            profile_h = _mess_key_to_profile(admin_h)
+            rebate_qs = rebate_qs.filter(
+                Q(hostel=admin_h) | Q(hostel=profile_h)
+            )
 
         coupon_total  = coupon_qs.aggregate(t=Sum('total_amount'))['t'] or 0
         coupon_count  = coupon_qs.count()

@@ -1,4 +1,5 @@
 import json
+import re
 
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
@@ -938,7 +939,14 @@ class RebateRequestSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context['request']
         user    = request.user
-        hostel  = user.hostel or ''
+        # Normalize to mess-key format ('hostel_14') regardless of how User.hostel
+        # was saved ('H14' from profile editor vs 'hostel_14' from mess key).
+        raw_hostel = user.hostel or ''
+        if raw_hostel in ('Tansa', 'tansa_house'):
+            hostel = 'tansa_house'
+        else:
+            m = re.match(r'^H(\d+)$', raw_hostel, re.IGNORECASE)
+            hostel = f'hostel_{m.group(1)}' if m else raw_hostel
         validated_data['student'] = user
         validated_data['hostel']  = hostel
         return super().create(validated_data)
