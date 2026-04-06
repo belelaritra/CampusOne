@@ -112,51 +112,72 @@ function FieldLabel({ children }) {
   );
 }
 
+const MEAL_TIME = {
+  BREAKFAST: '7:30 AM – 9:30 AM',
+  LUNCH:     '12:00 PM – 2:00 PM',
+  SNACKS:    '4:30 PM – 5:30 PM',
+  DINNER:    '7:30 PM – 9:30 PM',
+};
+
 // ---------------------------------------------------------------------------
-// Meal Card
+// Meal Card — flat list style matching the design
 // ---------------------------------------------------------------------------
 function MealCard({ meal }) {
   const type  = meal.meal_type;
-  const empty = !meal.items;
+  // Parse comma-separated items, filter out blanks
+  const items = meal.items
+    ? meal.items.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const empty = items.length === 0;
+
   return (
-    <div style={{
-      background:'var(--white-glass)',
-      backdropFilter:'blur(20px)',
-      borderRadius:'var(--radius-lg)',
-      border:`1px solid ${MEAL_BORDER[type]}40`,
-      boxShadow:'var(--shadow-sm)',
-      overflow:'hidden',
-      transition:'var(--transition)',
-      display:'flex', flexDirection:'column',
-    }}
-      onMouseEnter={e=>{ e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.boxShadow='var(--shadow-md)'; }}
-      onMouseLeave={e=>{ e.currentTarget.style.transform=''; e.currentTarget.style.boxShadow='var(--shadow-sm)'; }}
-    >
-      {/* header strip */}
-      <div style={{ background:MEAL_GRAD[type], padding:'0.7rem 1rem', display:'flex', alignItems:'center', gap:'0.6rem', borderBottom:`2px solid ${MEAL_BORDER[type]}60` }}>
-        <span style={{ fontSize:'1.5rem' }}>{MEAL_ICON[type]}</span>
-        <div>
-          <div style={{ fontFamily:'var(--font-heading)', fontWeight:700, fontSize:'0.95rem', color:MEAL_TEXT[type] }}>
-            {MEAL_LABEL[type]}
-          </div>
-          {meal.updated_at && !empty && (
-            <div style={{ fontSize:'0.67rem', color:MEAL_TEXT[type], opacity:0.7 }}>
-              Updated {new Date(meal.updated_at).toLocaleTimeString('en-IN',{ hour:'2-digit',minute:'2-digit' })}
-            </div>
-          )}
+    <div style={{ borderBottom:'1px solid rgba(0,0,0,0.07)', paddingBottom:'1.1rem', marginBottom:'1.1rem' }}>
+      {/* Meal header button-style pill */}
+      <div style={{ marginBottom:'0.75rem' }}>
+        <div style={{
+          display:'inline-flex', alignItems:'center', gap:'0.45rem',
+          background:MEAL_GRAD[type],
+          color:MEAL_TEXT[type],
+          border:`1.5px solid ${MEAL_BORDER[type]}`,
+          borderRadius:999,
+          padding:'0.4rem 1rem',
+          fontFamily:'var(--font-heading)', fontWeight:700, fontSize:'0.9rem',
+          boxShadow:'0 1px 4px rgba(0,0,0,0.07)',
+        }}>
+          <span>{MEAL_ICON[type]}</span>
+          <span>{MEAL_LABEL[type]}</span>
+          <span style={{ fontWeight:400, fontSize:'0.78rem', opacity:0.8 }}>({MEAL_TIME[type]})</span>
         </div>
+        {meal.updated_at && !empty && (
+          <span style={{ marginLeft:'0.6rem', fontSize:'0.68rem', color:'var(--text-secondary)' }}>
+            Updated {new Date(meal.updated_at).toLocaleTimeString('en-IN',{ hour:'2-digit',minute:'2-digit' })}
+          </span>
+        )}
       </div>
-      {/* body */}
-      <div style={{ padding:'0.85rem 1rem', flex:1 }}>
-        {empty
-          ? <p style={{ margin:0, fontSize:'0.82rem', color:'var(--text-light)', fontStyle:'italic', textAlign:'center', padding:'0.5rem 0' }}>
-              Menu not posted yet
-            </p>
-          : <p style={{ margin:0, fontSize:'0.875rem', lineHeight:1.65, color:'var(--text-primary)', whiteSpace:'pre-wrap' }}>
-              {meal.items}
-            </p>
-        }
-      </div>
+
+      {/* Food item chips */}
+      {empty
+        ? <p style={{ margin:0, fontSize:'0.82rem', color:'var(--text-light)', fontStyle:'italic', paddingLeft:'0.25rem' }}>
+            Menu not posted yet
+          </p>
+        : <div style={{ display:'flex', flexWrap:'wrap', gap:'0.45rem', paddingLeft:'0.1rem' }}>
+            {items.map((item, i) => (
+              <span key={i} style={{
+                display:'inline-block',
+                padding:'0.3rem 0.85rem',
+                borderRadius:999,
+                border:'1.5px solid rgba(0,0,0,0.12)',
+                background:'#fff',
+                fontSize:'0.82rem',
+                color:'var(--text-primary)',
+                fontWeight:500,
+                boxShadow:'0 1px 2px rgba(0,0,0,0.04)',
+              }}>
+                {item}
+              </span>
+            ))}
+          </div>
+      }
     </div>
   );
 }
@@ -269,10 +290,13 @@ function StudentMenuTab({ userHostel }) {
         ? <div style={{ textAlign:'center', padding:'3rem', color:'var(--text-secondary)' }}>
             <div style={{ fontSize:'2rem',marginBottom:'0.5rem' }}>⏳</div>Loading menu…
           </div>
-        : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))', gap:'1rem' }}>
+        : <SectionCard>
+            <p style={{ margin:'0 0 1rem', fontSize:'0.8rem', color:'var(--text-secondary)' }}>
+              Select a hostel to see its mess menu, or view today's general menu below.
+            </p>
             {(menu.length ? menu : MEALS.map(m => ({ meal_type:m, items:'', updated_at:null })))
               .map(m => <MealCard key={m.meal_type} meal={m} />)}
-          </div>
+          </SectionCard>
       }
     </div>
   );
@@ -722,16 +746,33 @@ function AdminMenuTab({ adminHostel }) {
               }}>
                 <div style={{ background:MEAL_GRAD[meal_type], padding:'0.65rem 1rem', display:'flex', alignItems:'center', gap:'0.6rem', borderBottom:`2px solid ${MEAL_BORDER[meal_type]}60` }}>
                   <span style={{ fontSize:'1.3rem' }}>{MEAL_ICON[meal_type]}</span>
-                  <span style={{ fontFamily:'var(--font-heading)', fontWeight:700, fontSize:'0.9rem', color:MEAL_TEXT[meal_type] }}>{MEAL_LABEL[meal_type]}</span>
+                  <span style={{ fontFamily:'var(--font-heading)', fontWeight:700, fontSize:'0.9rem', color:MEAL_TEXT[meal_type] }}>
+                    {MEAL_LABEL[meal_type]}
+                    <span style={{ fontWeight:400, fontSize:'0.78rem', marginLeft:'0.5rem', opacity:0.75 }}>({MEAL_TIME[meal_type]})</span>
+                  </span>
                 </div>
-                <div style={{ padding:'0.85rem 1rem', display:'flex', gap:'0.75rem' }}>
-                  <textarea rows={3} value={edits[meal_type]||''}
+                <div style={{ padding:'0.85rem 1rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                  <input
+                    type="text"
+                    value={edits[meal_type]||''}
                     onChange={e => setEdits(s => ({ ...s, [meal_type]: e.target.value }))}
-                    placeholder={`Enter ${MEAL_LABEL[meal_type]} items, one per line…`}
-                    style={{ flex:1, resize:'vertical', border:'2px solid rgba(0,61,130,0.15)', borderRadius:'var(--radius-md)', padding:'0.6rem 0.85rem', fontFamily:'var(--font-body)', fontSize:'0.875rem', outline:'none', transition:'var(--transition)' }}
+                    placeholder={`e.g. Rice, Dal, Roti, Paneer Curry, Salad`}
+                    style={{ flex:1, border:'2px solid rgba(0,61,130,0.15)', borderRadius:'var(--radius-md)', padding:'0.6rem 0.85rem', fontFamily:'var(--font-body)', fontSize:'0.875rem', outline:'none', transition:'var(--transition)', width:'100%', boxSizing:'border-box' }}
                     onFocus={e => { e.target.style.borderColor='var(--iitb-blue-light)'; e.target.style.boxShadow='0 0 0 4px rgba(0,61,130,0.1)'; }}
                     onBlur={e  => { e.target.style.borderColor='rgba(0,61,130,0.15)'; e.target.style.boxShadow=''; }}
                   />
+                  {/* live chip preview */}
+                  {edits[meal_type] && (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'0.35rem', paddingTop:'0.15rem' }}>
+                      {edits[meal_type].split(',').map(s => s.trim()).filter(Boolean).map((item, i) => (
+                        <span key={i} style={{
+                          padding:'0.2rem 0.65rem', borderRadius:999,
+                          border:'1.5px solid rgba(0,0,0,0.12)', background:'#f8fafc',
+                          fontSize:'0.75rem', color:'var(--text-primary)', fontWeight:500,
+                        }}>{item}</span>
+                      ))}
+                    </div>
+                  )}
                   <button className="btn btn-secondary" onClick={() => saveSlot(meal_type)}
                     disabled={saving[meal_type]} style={{ alignSelf:'flex-start', padding:'0.5rem 0.9rem' }}>
                     {saving[meal_type] ? '⏳' : '💾'}
