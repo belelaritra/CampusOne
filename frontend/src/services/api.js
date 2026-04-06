@@ -211,6 +211,31 @@ export const getConsoleSettings = ()              => api.get('/console/settings/
 export const updateConsoleSetting=(id, data)      => api.patch(`/console/settings/${id}/`, data).then(r => r.data);
 
 // ---------------------------------------------------------------------------
+// Contacts Module API
+// ---------------------------------------------------------------------------
+export const getFaculty          = (params = {}) => api.get('/contacts/faculty/',           { params }).then(r => r.data);
+export const createFaculty       = (data)        => api.post('/contacts/faculty/', data,    { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
+export const updateFaculty       = (id, data)    => api.patch(`/contacts/faculty/${id}/`,   data, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
+export const deleteFaculty       = (id)          => api.delete(`/contacts/faculty/${id}/`).then(r => r.data);
+export const toggleFacultyAvail  = (id)          => api.patch(`/contacts/faculty/${id}/toggle-availability/`).then(r => r.data);
+
+export const getDepartments      = (params = {}) => api.get('/contacts/departments/',        { params }).then(r => r.data);
+export const createDepartment    = (data)        => api.post('/contacts/departments/', data).then(r => r.data);
+export const updateDepartment    = (id, data)    => api.patch(`/contacts/departments/${id}/`, data).then(r => r.data);
+export const deleteDepartment    = (id)          => api.delete(`/contacts/departments/${id}/`).then(r => r.data);
+
+export const getEmergencyContacts  = (params = {}) => api.get('/contacts/emergency/',          { params }).then(r => r.data);
+export const createEmergencyContact= (data)        => api.post('/contacts/emergency/', data).then(r => r.data);
+export const updateEmergencyContact= (id, data)    => api.patch(`/contacts/emergency/${id}/`,  data).then(r => r.data);
+export const deleteEmergencyContact= (id)          => api.delete(`/contacts/emergency/${id}/`).then(r => r.data);
+
+// ---------------------------------------------------------------------------
+// Doctor Schedule API
+// ---------------------------------------------------------------------------
+export const getDoctorSchedule   = ()  => api.get('/doctors/schedule/').then(r => r.data);
+export const refreshDoctorSchedule = () => api.post('/doctors/schedule/').then(r => r.data);
+
+// ---------------------------------------------------------------------------
 // Legacy Campus API (unchanged)
 // ---------------------------------------------------------------------------
 export const getHostels    = () => api.get('/hostels/').then(r => r.data);

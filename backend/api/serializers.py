@@ -18,6 +18,8 @@ from .models import (
     MessHostelSettings, MessAdminProfile, DailyMenu,
     GuestCouponPurchase, RebateRequest,
     MESS_HOSTEL_KEYS, MESS_MEAL_KEYS, MESS_HOSTEL_LABEL, MESS_MEAL_LABEL,
+    # Contacts Module
+    Faculty, Department, EmergencyContact,
 )
 
 DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
@@ -1047,3 +1049,45 @@ class AdminUserUpdateSerializer(serializers.ModelSerializer):
             elif mess_hostel == '' or mess_hostel is None:
                 MessAdminProfile.objects.filter(user=instance).delete()
         return instance
+
+
+# ---------------------------------------------------------------------------
+# Contacts Module Serializers
+# ---------------------------------------------------------------------------
+
+class FacultySerializer(serializers.ModelSerializer):
+    photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Faculty
+        fields = [
+            'id', 'name', 'photo_url', 'department', 'specialization',
+            'email', 'cabin_no', 'is_available', 'updated_at',
+        ]
+
+    def get_photo_url(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.photo.url) if request else obj.photo.url
+        return None
+
+
+class FacultyWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Faculty
+        fields = [
+            'name', 'photo', 'department', 'specialization',
+            'email', 'cabin_no', 'is_available',
+        ]
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Department
+        fields = ['id', 'name', 'official_contact', 'official_email', 'location', 'maps_url']
+
+
+class EmergencyContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = EmergencyContact
+        fields = ['id', 'service_name', 'contact', 'order']

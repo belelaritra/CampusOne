@@ -30,6 +30,10 @@ from .models import (
     MessHostelSettings, MessAdminProfile, DailyMenu,
     GuestCouponPurchase, RebateRequest,
     MESS_HOSTEL_KEYS, MESS_MEAL_KEYS, MESS_HOSTEL_LABEL,
+    # Contacts Module
+    Faculty, Department, EmergencyContact,
+    # Doctor Schedule
+    DoctorScheduleCache,
 )
 from .serializers import (
     RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
@@ -49,6 +53,9 @@ from .serializers import (
     RebateRequestSerializer, RebateReviewSerializer,
     # Admin Console
     AdminUserListSerializer, AdminUserUpdateSerializer,
+    # Contacts Module
+    FacultySerializer, FacultyWriteSerializer,
+    DepartmentSerializer, EmergencyContactSerializer,
 )
 
 
@@ -2491,3 +2498,164 @@ class ConsoleSettingsViewSet(viewsets.ViewSet):
         ser.is_valid(raise_exception=True)
         ser.save()
         return Response(ser.data)
+
+
+# ===========================================================================
+# Contacts Module
+# ===========================================================================
+
+class ContactsIsStaffOrReadOnly(BasePermission):
+    """Anyone can read; only staff can write."""
+    def has_permission(self, request, view):
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return request.user.is_authenticated
+        return request.user.is_authenticated and request.user.is_staff
+
+
+class FacultyViewSet(viewsets.ViewSet):
+    permission_classes = [ContactsIsStaffOrReadOnly]
+
+    def list(self, request):
+        qs = Faculty.objects.all()
+        q    = request.query_params.get('q', '').strip()
+        dept = request.query_params.get('dept', '').strip()
+        avail = request.query_params.get('available', '').strip()
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(department__icontains=q) |
+                Q(specialization__icontains=q)
+            )
+        if dept:
+            qs = qs.filter(department__iexact=dept)
+        if avail in ('true', 'false'):
+            qs = qs.filter(is_available=(avail == 'true'))
+        ser = FacultySerializer(qs, many=True, context={'request': request})
+        return Response(ser.data)
+
+    def create(self, request):
+        ser = FacultyWriteSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(FacultySerializer(obj, context={'request': request}).data, status=201)
+
+    def partial_update(self, request, pk=None):
+        try:
+            obj = Faculty.objects.get(pk=pk)
+        except Faculty.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = FacultyWriteSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(FacultySerializer(obj, context={'request': request}).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            Faculty.objects.get(pk=pk).delete()
+        except Faculty.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        return Response(status=204)
+
+    @action(detail=True, methods=['patch'], url_path='toggle-availability')
+    def toggle_availability(self, request, pk=None):
+        try:
+            obj = Faculty.objects.get(pk=pk)
+        except Faculty.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        obj.is_available = not obj.is_available
+        obj.save(update_fields=['is_available', 'updated_at'])
+        return Response(FacultySerializer(obj, context={'request': request}).data)
+
+
+class DepartmentViewSet(viewsets.ViewSet):
+    permission_classes = [ContactsIsStaffOrReadOnly]
+
+    def list(self, request):
+        qs = Department.objects.all()
+        q = request.query_params.get('q', '').strip()
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(location__icontains=q))
+        return Response(DepartmentSerializer(qs, many=True).data)
+
+    def create(self, request):
+        ser = DepartmentSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(DepartmentSerializer(obj).data, status=201)
+
+    def partial_update(self, request, pk=None):
+        try:
+            obj = Department.objects.get(pk=pk)
+        except Department.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = DepartmentSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        return Response(DepartmentSerializer(ser.save()).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            Department.objects.get(pk=pk).delete()
+        except Department.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        return Response(status=204)
+
+
+class EmergencyContactViewSet(viewsets.ViewSet):
+    permission_classes = [ContactsIsStaffOrReadOnly]
+
+    def list(self, request):
+        qs = EmergencyContact.objects.all()
+        q = request.query_params.get('q', '').strip()
+        if q:
+            qs = qs.filter(Q(service_name__icontains=q) | Q(contact__icontains=q))
+        return Response(EmergencyContactSerializer(qs, many=True).data)
+
+    def create(self, request):
+        ser = EmergencyContactSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(EmergencyContactSerializer(obj).data, status=201)
+
+    def partial_update(self, request, pk=None):
+        try:
+            obj = EmergencyContact.objects.get(pk=pk)
+        except EmergencyContact.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = EmergencyContactSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        return Response(EmergencyContactSerializer(ser.save()).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            EmergencyContact.objects.get(pk=pk).delete()
+        except EmergencyContact.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Doctor Schedule
+# ---------------------------------------------------------------------------
+
+class DoctorScheduleView(APIView):
+    """Return the cached doctor schedule. Staff can also trigger a manual refresh."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        try:
+            cache = DoctorScheduleCache.objects.get(id=1)
+            return Response(cache.data)
+        except DoctorScheduleCache.DoesNotExist:
+            return Response({'detail': 'Schedule not yet fetched. Ask admin to run fetch_doctors.'}, status=404)
+
+    def post(self, request):
+        """Manual refresh — staff only."""
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return Response({'detail': 'Staff only.'}, status=403)
+        from django.core.management import call_command
+        try:
+            call_command('fetch_doctors')
+            cache = DoctorScheduleCache.objects.get(id=1)
+            return Response(cache.data)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=500)

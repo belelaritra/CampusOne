@@ -745,3 +745,71 @@ class RebateRequest(models.Model):
     def __str__(self):
         return (f"{self.student.username} rebate {self.start_date}→{self.end_date} "
                 f"[{self.status}]")
+
+
+# ---------------------------------------------------------------------------
+# Contacts Module
+# ---------------------------------------------------------------------------
+
+class Faculty(models.Model):
+    name           = models.CharField(max_length=200)
+    photo          = models.ImageField(upload_to='faculty_photos/', null=True, blank=True)
+    department     = models.CharField(max_length=100, db_index=True)
+    specialization = models.CharField(max_length=200, blank=True)
+    email          = models.EmailField(blank=True)
+    cabin_no       = models.CharField(max_length=50, blank=True)
+    is_available   = models.BooleanField(default=True)  # False = on leave
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['department', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.department})"
+
+
+class Department(models.Model):
+    name             = models.CharField(max_length=200)
+    official_contact = models.CharField(max_length=50, blank=True)
+    official_email   = models.EmailField(blank=True)
+    location         = models.CharField(max_length=200, blank=True)
+    maps_url         = models.URLField(max_length=500, blank=True,
+                           help_text="Direct Google Maps URL for this department")
+    created_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class EmergencyContact(models.Model):
+    service_name = models.CharField(max_length=100)
+    contact      = models.CharField(max_length=100)
+    order        = models.PositiveSmallIntegerField(default=0,
+                       help_text="Display order (lower = shown first)")
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['order', 'service_name']
+
+    def __str__(self):
+        return f"{self.service_name}: {self.contact}"
+
+
+# ---------------------------------------------------------------------------
+# Doctor Schedule Cache
+# ---------------------------------------------------------------------------
+
+class DoctorScheduleCache(models.Model):
+    """Stores the last-fetched parsed doctor schedule as JSON."""
+    data       = models.JSONField(default=dict)
+    fetched_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Doctor Schedule Cache'
+
+    def __str__(self):
+        return f"Doctor schedule (fetched {self.fetched_at})"

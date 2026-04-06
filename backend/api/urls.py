@@ -52,6 +52,18 @@ console_settings_router = DefaultRouter()
 console_settings_router.register(r'settings', views.ConsoleSettingsViewSet, basename='console-settings')
 
 # ---------------------------------------------------------------------------
+# Contacts Module routers
+# ---------------------------------------------------------------------------
+faculty_router = DefaultRouter()
+faculty_router.register(r'faculty', views.FacultyViewSet, basename='faculty')
+
+department_router = DefaultRouter()
+department_router.register(r'departments', views.DepartmentViewSet, basename='department')
+
+emergency_router = DefaultRouter()
+emergency_router.register(r'emergency', views.EmergencyContactViewSet, basename='emergency')
+
+# ---------------------------------------------------------------------------
 # Legacy campus routers (unchanged)
 # ---------------------------------------------------------------------------
 campus_router = DefaultRouter()
@@ -126,6 +138,14 @@ urlpatterns = [
     path('console/', include(console_coupon_router.urls)),
     path('console/', include(console_rebate_router.urls)),
     path('console/', include(console_settings_router.urls)),
+
+    # --- Contacts Module ---
+    path('contacts/', include(faculty_router.urls)),
+    path('contacts/', include(department_router.urls)),
+    path('contacts/', include(emergency_router.urls)),
+
+    # --- Doctor Schedule ---
+    path('doctors/schedule/', views.DoctorScheduleView.as_view(), name='doctor-schedule'),
 
     # --- Campus (legacy) ---
     path('', include(campus_router.urls)),
