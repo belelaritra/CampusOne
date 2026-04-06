@@ -40,6 +40,12 @@ def _clean(text):
     return ' '.join(text.split())
 
 
+def _clean_timing(text):
+    """Preserve line breaks in timing; collapse spaces within each line."""
+    lines = [' '.join(line.split()) for line in text.split('\n')]
+    return '\n'.join(line for line in lines if line)
+
+
 def _detect_category(text):
     """Return category_key if text is a category header, else None."""
     t = text.upper().strip()
@@ -60,7 +66,7 @@ def _parse_entry(sno, name, room, timing):
         'sno':    _clean(sno),
         'name':   name,
         'room':   _clean(room),
-        'timing': _clean(timing),
+        'timing': _clean_timing(timing),
     }
 
 
