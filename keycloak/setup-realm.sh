@@ -61,7 +61,8 @@ curl -s -o /dev/null -w "%{http_code}" -X POST "$KC_URL/admin/realms" \
     \"accessTokenLifespan\": 300,
     \"ssoSessionMaxLifespan\": 28800,
     \"refreshTokenMaxReuse\": 0,
-    \"passwordPolicy\": \"length(8) and notUsername\"
+    \"passwordPolicy\": \"length(8) and notUsername\",
+    \"loginTheme\": \"campusone\"
   }" | grep -qE "^(201|409)$" && log "  Realm created (or already exists)." \
     || warn "  Unexpected response creating realm."
 
@@ -97,15 +98,11 @@ curl -s -o /dev/null -X POST "$KC_URL/admin/realms/$REALM/clients" \
     "protocol": "openid-connect",
     "redirectUris": [
       "http://localhost:5173/*",
-      "http://localhost:5174/*",
-      "http://127.0.0.1:5173/*",
-      "http://127.0.0.1:5174/*"
+      "http://127.0.0.1:5173/*"
     ],
     "webOrigins": [
       "http://localhost:5173",
-      "http://localhost:5174",
-      "http://127.0.0.1:5173",
-      "http://127.0.0.1:5174"
+      "http://127.0.0.1:5173"
     ],
     "attributes": {
       "pkce.code.challenge.method": "S256"

@@ -49,6 +49,8 @@ services:
       KC_LOG_LEVEL:       INFO
     ports:
       - "8080:8080"
+    volumes:
+      - ./keycloak/themes/campusone:/opt/keycloak/themes/campusone
     depends_on:
       keycloak-db:
         condition: service_healthy

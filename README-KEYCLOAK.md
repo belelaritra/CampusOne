@@ -40,6 +40,10 @@ DELETE  /api/auth/reset-password/
 
 ### Step 1 — Start Keycloak
 
+The custom CampusOne theme (`keycloak/themes/campusone/`) is automatically
+mounted into the container via the volume in `docker-compose.yml`. No extra
+copy step needed.
+
 ```bash
 # From project root
 docker compose up -d
@@ -65,6 +69,7 @@ This creates:
 - Client: `campusone-frontend` (public, PKCE)
 - Roles: `campus-staff`, `campus-security`, `outlet-admin`, `mess-admin`
 - Test admin user: `campus_admin` / `Admin@123` (with `campus-staff` role)
+- Login theme set to **campusone** (custom IIT Bombay–styled UI)
 
 ---
 
