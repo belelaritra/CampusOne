@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+  <head><title>SSO Check</title></head>
+  <body>
+    <script>
+      // Required by Keycloak JS adapter for silent SSO session detection.
+      // This page is loaded in a hidden iframe — it posts the result back to the main window.
+      parent.postMessage(location.href, location.origin);
+    </script>
+  </body>
+</html>

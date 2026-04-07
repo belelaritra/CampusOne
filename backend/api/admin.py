@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
-    User, HelpRequest, PasswordResetToken,
+    User, HelpRequest,
     Hostel, FoodOutlet, FoodItem, Order,
     LostFoundItem, MarketplaceListing, Doctor, CampusEvent,
     # Food Ordering
@@ -37,12 +37,6 @@ class HelpRequestAdmin(admin.ModelAdmin):
     list_filter   = ('status', 'pickup_location')
     search_fields = ('item_description', 'requester__username', 'helper__username')
     readonly_fields = ('created_at',)
-
-
-@admin.register(PasswordResetToken)
-class PasswordResetTokenAdmin(admin.ModelAdmin):
-    list_display = ('user', 'token', 'created_at', 'used')
-    list_filter  = ('used',)
 
 
 # Legacy models

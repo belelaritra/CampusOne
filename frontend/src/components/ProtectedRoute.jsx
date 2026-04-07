@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import keycloak from '../keycloak';
 
+/**
+ * ProtectedRoute — guards all authenticated pages.
+ *
+ * If not authenticated, triggers keycloak.login() directly with redirectUri='/'
+ * so Keycloak always returns to the app root — never to /login.
+ * This eliminates the redirect loop caused by Keycloak returning to /login
+ * while the auth code is still being exchanged.
+ */
 export default function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
@@ -12,18 +20,27 @@ export default function ProtectedRoute({ children }) {
     return () => clearTimeout(id);
   }, [loading]);
 
-  if (loading) {
+  // Not authenticated and Keycloak has no token — initiate login
+  if (!loading && !user && !keycloak.authenticated) {
+    keycloak.login({ redirectUri: window.location.origin + '/' });
+    return null;
+  }
+
+  // Still initialising (keycloak.init processing auth code, or profile fetching)
+  if (loading || (!user && keycloak.authenticated)) {
     return (
       <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', fontFamily: 'Inter, sans-serif', color: 'var(--text-secondary, #666)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', height: '100vh',
+        fontFamily: 'Inter, sans-serif', color: 'var(--text-secondary, #666)',
         gap: '1rem',
       }}>
         {timedOut ? (
           <>
             <span style={{ fontSize: '1.5rem' }}>⚠️</span>
-            <p style={{ margin: 0 }}>Taking too long. Check your connection and&nbsp;
-              <a href="/login" style={{ color: 'inherit', fontWeight: 700 }}>try logging in again</a>.
+            <p style={{ margin: 0 }}>
+              Taking too long. Check that Keycloak is running and&nbsp;
+              <a href="/" style={{ color: 'inherit', fontWeight: 700 }}>try again</a>.
             </p>
           </>
         ) : (
@@ -31,10 +48,6 @@ export default function ProtectedRoute({ children }) {
         )}
       </div>
     );
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
   }
 
   return children;

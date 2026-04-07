@@ -10,14 +10,11 @@ from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission, IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
-
 import datetime as dt
 import re
 
 from .models import (
-    User, HelpRequest, PasswordResetToken,
+    User, HelpRequest,
     Hostel, FoodOutlet, Order, LostFoundItem,
     MarketplaceListing, Doctor, CampusEvent,
     PICKUP_CHOICES,
@@ -36,8 +33,7 @@ from .models import (
     DoctorScheduleCache,
 )
 from .serializers import (
-    RegisterSerializer, UserProfileSerializer, UserProfileUpdateSerializer,
-    ChangePasswordSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
+    UserProfileSerializer, UserProfileUpdateSerializer,
     HelpRequestCreateSerializer, HelpRequestEditSerializer, HelpRequestSerializer,
     HostelSerializer, FoodOutletSerializer, OrderSerializer,
     LostFoundSerializer, MarketplaceSerializer, DoctorSerializer, EventSerializer,
@@ -86,64 +82,6 @@ ACCEPT_RADIUS_METRES = 200
 # Auth Views
 # ---------------------------------------------------------------------------
 
-class RegisterView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
-        }, status=status.HTTP_201_CREATED)
-
-
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        username = request.data.get('username', '').strip()
-        password = request.data.get('password', '')
-        if not username or not password:
-            return Response({'detail': 'Username and password are required.'}, status=400)
-
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return Response({'detail': 'Invalid credentials.'}, status=400)
-
-        if not user.check_password(password):
-            return Response({'detail': 'Invalid credentials.'}, status=400)
-
-        if not user.is_active:
-            return Response({'detail': 'Account is disabled.'}, status=403)
-
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
-        })
-
-
-class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        refresh_token = request.data.get('refresh')
-        if not refresh_token:
-            return Response({'detail': 'Refresh token required.'}, status=400)
-        try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-        except TokenError:
-            pass  # Already blacklisted or invalid — still treat as logged out
-        return Response({'detail': 'Logged out successfully.'})
-
-
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -160,67 +98,6 @@ class UserProfileView(APIView):
         return Response(UserProfileSerializer(request.user, context={'request': request}).data)
 
 
-class ChangePasswordView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = ChangePasswordSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = request.user
-        if not user.check_password(serializer.validated_data['old_password']):
-            return Response({'detail': 'Old password is incorrect.'}, status=400)
-        user.set_password(serializer.validated_data['new_password'])
-        user.save()
-        return Response({'detail': 'Password changed successfully.'})
-
-
-class ForgotPasswordView(APIView):
-    """
-    Token-based password reset (no email server required in dev).
-    Returns the reset token in the response. In production, email it instead.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = ForgotPasswordSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        username = serializer.validated_data['username']
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            # Don't reveal whether user exists
-            return Response({'detail': 'If that account exists, a reset token has been generated.'})
-
-        token_obj = PasswordResetToken.objects.create(user=user)
-        # In production: send token_obj.token via email
-        return Response({
-            'detail': 'Reset token generated. Copy this token to reset your password.',
-            'reset_token': str(token_obj.token),  # Remove in production
-        })
-
-
-class ResetPasswordView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = ResetPasswordSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            token_obj = PasswordResetToken.objects.select_related('user').get(
-                token=serializer.validated_data['token']
-            )
-        except PasswordResetToken.DoesNotExist:
-            return Response({'detail': 'Invalid or expired reset token.'}, status=400)
-
-        if not token_obj.is_valid():
-            return Response({'detail': 'Reset token has expired or already been used.'}, status=400)
-
-        user = token_obj.user
-        user.set_password(serializer.validated_data['new_password'])
-        user.save()
-        token_obj.used = True
-        token_obj.save(update_fields=['used'])
-        return Response({'detail': 'Password reset successfully. You can now log in.'})
 
 
 # ---------------------------------------------------------------------------

@@ -1,87 +1,105 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+/**
+ * AuthContext — Keycloak-backed authentication context.
+ *
+ * Keycloak is already initialised in main.jsx before this mounts.
+ * This context:
+ *   - Fetches the Django-side user profile (/api/auth/me/) after KC auth
+ *   - Exposes login / logout / updateUser helpers consumed by UI components
+ *   - Proactively refreshes the Keycloak token before it expires
+ *
+ * Token management (attach to requests, 401 retry) lives entirely in api.js.
+ * No token state is kept here — api.js reads keycloak.token directly.
+ */
+import {
+  createContext, useContext, useState,
+  useEffect, useCallback, useRef,
+} from 'react';
+import keycloak from '../keycloak';
 import api from '../services/api';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]               = useState(null);
-  const [accessToken, setAccessToken] = useState(null);
-  const [loading, setLoading]         = useState(true);
+  // Django-side profile (photo, roll_number, hostel, points, etc.)
+  const [user, setUser]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const timerRef              = useRef(null);
 
-  // On mount, try to restore session from stored refresh token
   useEffect(() => {
-    const savedRefresh = localStorage.getItem('refresh_token');
-    if (!savedRefresh) {
+    if (keycloak.authenticated) {
+      // Fetch the enriched Django profile (photo, campus fields, role flags)
+      api.get('/auth/me/')
+        .then(res => setUser(res.data))
+        .catch(() => {
+          // Profile fetch failed — leave user null; ProtectedRoute handles redirect.
+          // Do NOT call keycloak.login() here — causes an infinite OPTIONS/redirect loop.
+        })
+        .finally(() => setLoading(false));
+    } else {
       setLoading(false);
-      return;
     }
 
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Session restore timed out')), 12000)
-    );
+    // Proactively refresh the token 60 s before it expires.
+    // keycloak.updateToken(minValidity) refreshes only if the token
+    // expires within minValidity seconds — no-ops otherwise.
+    timerRef.current = setInterval(() => {
+      keycloak.updateToken(60).catch(() => {
+        // Refresh failed (session expired on Keycloak side) — redirect to login
+        clearInterval(timerRef.current);
+        keycloak.login();
+      });
+    }, 30_000); // check every 30 s
 
-    Promise.race([
-      api.post('/auth/refresh/', { refresh: savedRefresh })
-        .then(res => {
-          const newAccess = res.data.access;
-          setAccessToken(newAccess);
-          // SimpleJWT rotates the refresh token on every use — always persist
-          // the new one so the next hard-refresh doesn't use a consumed token.
-          if (res.data.refresh) localStorage.setItem('refresh_token', res.data.refresh);
-          return api.get('/auth/me/', {
-            headers: { Authorization: `Bearer ${newAccess}` },
-          });
-        })
-        .then(res => setUser(res.data)),
-      timeout,
-    ])
-      .catch(() => {
-        // Refresh token invalid/expired/timed out — clear storage
-        localStorage.removeItem('refresh_token');
-      })
-      .finally(() => setLoading(false));
+    // Keycloak hook — fires if the token expires between interval ticks
+    keycloak.onTokenExpired = () => {
+      keycloak.updateToken(30).catch(() => keycloak.login());
+    };
+
+    return () => clearInterval(timerRef.current);
   }, []);
 
-  const login = useCallback(async (credentials) => {
-    const res = await api.post('/auth/login/', credentials);
-    const { user: u, access, refresh } = res.data;
-    setUser(u);
-    setAccessToken(access);
-    localStorage.setItem('refresh_token', refresh);
-    return u;
+  // ------------------------------------------------------------------
+  // Public API
+  // ------------------------------------------------------------------
+
+  /** Redirect to Keycloak's login page. */
+  const login = useCallback(() => {
+    keycloak.login();
   }, []);
 
-  const logout = useCallback(async () => {
-    const refresh = localStorage.getItem('refresh_token');
-    try {
-      if (refresh && accessToken) {
-        await api.post('/auth/logout/', { refresh }, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-      }
-    } catch (_) { /* ignore */ }
+  /** Logout from both the app and Keycloak SSO. */
+  const logout = useCallback(() => {
     setUser(null);
-    setAccessToken(null);
-    localStorage.removeItem('refresh_token');
-  }, [accessToken]);
-
-  const refreshAccessToken = useCallback(async () => {
-    const refresh = localStorage.getItem('refresh_token');
-    if (!refresh) throw new Error('No refresh token');
-    const res = await api.post('/auth/refresh/', { refresh });
-    const newAccess = res.data.access;
-    // SimpleJWT rotates refresh too
-    if (res.data.refresh) localStorage.setItem('refresh_token', res.data.refresh);
-    setAccessToken(newAccess);
-    return newAccess;
+    keycloak.logout({ redirectUri: window.location.origin + '/login' });
   }, []);
 
+  /**
+   * Force-refresh the Keycloak access token and return the new value.
+   * Used by api.js interceptor on 401 responses.
+   */
+  const refreshAccessToken = useCallback(async () => {
+    await keycloak.updateToken(30);
+    return keycloak.token;
+  }, []);
+
+  /** Merge partial updates into the local user object (after profile PATCH). */
   const updateUser = useCallback((updated) => {
     setUser(prev => ({ ...prev, ...updated }));
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, login, logout, refreshAccessToken, updateUser, loading }}>
+    <AuthContext.Provider value={{
+      user,
+      // accessToken is intentionally a live getter, not state.
+      // Components that need it (e.g. App.jsx legacy wiring) get the current
+      // Keycloak token value at call time. api.js reads keycloak.token directly.
+      get accessToken() { return keycloak.token ?? null; },
+      login,
+      logout,
+      refreshAccessToken,
+      updateUser,
+      loading,
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,5 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
 
 # ---------------------------------------------------------------------------
@@ -76,15 +75,8 @@ campus_router.register(r'doctors',     views.DoctorViewSet)
 campus_router.register(r'events',      views.EventViewSet)
 
 urlpatterns = [
-    # --- Auth ---
-    path('auth/register/',        views.RegisterView.as_view(),       name='auth-register'),
-    path('auth/login/',           views.LoginView.as_view(),          name='auth-login'),
-    path('auth/logout/',          views.LogoutView.as_view(),         name='auth-logout'),
-    path('auth/refresh/',         TokenRefreshView.as_view(),         name='auth-refresh'),
+    # --- Auth (Keycloak owns login/logout/register/password-reset) ---
     path('auth/me/',              views.UserProfileView.as_view(),    name='auth-me'),
-    path('auth/change-password/', views.ChangePasswordView.as_view(), name='auth-change-password'),
-    path('auth/forgot-password/', views.ForgotPasswordView.as_view(), name='auth-forgot-password'),
-    path('auth/reset-password/',  views.ResetPasswordView.as_view(),  name='auth-reset-password'),
 
     # --- Help & Delivery ---
     path('help/', include(help_router.urls)),

@@ -1,0 +1,57 @@
+# CampusOne — Keycloak stack
+# Runs Keycloak + its PostgreSQL DB.
+# Django and React run locally as before (python manage.py runserver / npm run dev).
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down
+# Wipe:   docker compose down -v   (deletes Keycloak DB data)
+
+services:
+
+  # ── Keycloak database ────────────────────────────────────────────────────
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: campusone-keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       keycloak
+      POSTGRES_USER:     keycloak
+      POSTGRES_PASSWORD: keycloak_secret
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Keycloak identity provider ───────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: campusone-keycloak
+    restart: unless-stopped
+    command: start-dev   # use 'start' + TLS cert for production
+    environment:
+      # Database
+      KC_DB:              postgres
+      KC_DB_URL:          jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME:     keycloak
+      KC_DB_PASSWORD:     keycloak_secret
+      # Admin credentials (change in production!)
+      KEYCLOAK_ADMIN:          admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Hostname (must match what the browser sees)
+      KC_HOSTNAME:        localhost
+      KC_HOSTNAME_PORT:   8080
+      KC_HTTP_ENABLED:    "true"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      # Logging
+      KC_LOG_LEVEL:       INFO
+    ports:
+      - "8080:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+volumes:
+  keycloak_db_data:

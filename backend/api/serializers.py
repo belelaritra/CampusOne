@@ -4,7 +4,7 @@ import re
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from .models import (
-    User, HelpRequest, PasswordResetToken,
+    User, HelpRequest,
     Hostel, FoodOutlet, FoodItem, Order,
     LostFoundItem, MarketplaceListing, Doctor, CampusEvent,
     PICKUP_CHOICES, DELIVERY_CHOICES,
@@ -28,31 +28,6 @@ DURATION_VALUES = [5, 10, 15, 30, 60, 90, 120]
 # ---------------------------------------------------------------------------
 # Auth Serializers
 # ---------------------------------------------------------------------------
-
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
-
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'phone', 'full_name', 'phone_number', 'roll_number', 'password']
-        extra_kwargs = {'email': {'required': True}}
-
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
-        return value
-
-    def create(self, validated_data):
-        return User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            phone=validated_data.get('phone', ''),
-            full_name=validated_data.get('full_name', ''),
-            phone_number=validated_data.get('phone_number', ''),
-            roll_number=validated_data.get('roll_number', ''),
-            password=validated_data['password'],
-        )
-
 
 class UserProfileSerializer(serializers.ModelSerializer):
     is_outlet_admin  = serializers.SerializerMethodField()
@@ -135,18 +110,6 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
         return value
 
 
-class ChangePasswordSerializer(serializers.Serializer):
-    old_password = serializers.CharField(required=True, write_only=True)
-    new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
-
-
-class ForgotPasswordSerializer(serializers.Serializer):
-    username = serializers.CharField(required=True)
-
-
-class ResetPasswordSerializer(serializers.Serializer):
-    token = serializers.UUIDField(required=True)
-    new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react';
 import { SectionHeader } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { changePassword, updateProfile } from '../services/api';
 import api from '../services/api';
+import keycloak from '../keycloak';
 
 const HOSTEL_OPTIONS = [
   { key: '',       label: '— Select hostel —' },
@@ -61,15 +61,9 @@ export default function Profile() {
   const [profBusy, setProfBusy] = useState(false);
   const [editing,  setEditing]  = useState(false);
 
-  /* ---------- password change state ---------- */
-  const [pw,     setPw]     = useState({ old_password: '', new_password: '', confirm: '' });
-  const [pwErr,  setPwErr]  = useState('');
-  const [pwOk,   setPwOk]   = useState('');
-  const [pwBusy, setPwBusy] = useState(false);
 
   /* ---------- handlers ---------- */
   const handleProf = e => setProf(p => ({ ...p, [e.target.name]: e.target.value }));
-  const handlePw   = e => setPw(p => ({ ...p, [e.target.name]: e.target.value }));
 
   function handlePhotoChange(e) {
     const file = e.target.files[0];
@@ -105,23 +99,6 @@ export default function Profile() {
       setProfErr(msg);
     } finally {
       setProfBusy(false);
-    }
-  }
-
-  async function submitPassword(e) {
-    e.preventDefault();
-    setPwErr(''); setPwOk('');
-    if (pw.new_password !== pw.confirm) return setPwErr('Passwords do not match.');
-    if (pw.new_password.length < 8) return setPwErr('Password must be at least 8 characters.');
-    setPwBusy(true);
-    try {
-      await changePassword({ old_password: pw.old_password, new_password: pw.new_password });
-      setPwOk('Password changed successfully!');
-      setPw({ old_password: '', new_password: '', confirm: '' });
-    } catch (err) {
-      setPwErr(err.response?.data?.detail || err.response?.data?.old_password?.[0] || 'Failed to change password.');
-    } finally {
-      setPwBusy(false);
     }
   }
 
@@ -317,39 +294,29 @@ export default function Profile() {
         )}
       </div>
 
-      {/* ── Change Password ───────────────────────────────────── */}
+      {/* ── Account Security ──────────────────────────────────── */}
       <div style={{ maxWidth: 560 }}>
-        <h3 style={{ marginBottom: '1rem' }}>Change Password</h3>
-
-        {pwErr && <div className="auth-error"   style={{ marginBottom: '0.75rem' }}>{pwErr}</div>}
-        {pwOk  && <div className="auth-success" style={{ marginBottom: '0.75rem' }}>{pwOk}</div>}
-
-        <form onSubmit={submitPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="form-group">
-            <label>Current Password</label>
-            <input name="old_password" type="password" className="search-input"
-              placeholder="Your current password" value={pw.old_password} onChange={handlePw} required />
-          </div>
-          <div className="form-group">
-            <label>New Password</label>
-            <input name="new_password" type="password" className="search-input"
-              placeholder="Min. 8 characters" value={pw.new_password} onChange={handlePw} required />
-          </div>
-          <div className="form-group">
-            <label>Confirm New Password</label>
-            <input name="confirm" type="password" className="search-input"
-              placeholder="Re-enter new password" value={pw.confirm} onChange={handlePw} required />
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <button type="submit" className="btn btn-primary" disabled={pwBusy}>
-              {pwBusy ? 'Saving…' : 'Update Password'}
+        <h3 style={{ marginBottom: '1rem' }}>Account Security</h3>
+        <div className="request-card" style={{ padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+            Passwords and security settings are managed through the CampusOne identity portal.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => keycloak.login({ action: 'UPDATE_PASSWORD' })}
+            >
+              Change Password
             </button>
-            <button type="button" className="btn" onClick={logout}
-              style={{ color: '#dc2626', border: '1px solid #fca5a5', marginLeft: 'auto' }}>
+            <button
+              type="button" className="btn"
+              onClick={logout}
+              style={{ color: '#dc2626', border: '1px solid #fca5a5' }}
+            >
               Sign Out
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </section>
   );

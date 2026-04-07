@@ -26,6 +26,8 @@ class User(AbstractUser):
     room_number  = models.CharField(max_length=20,  blank=True)
     points       = models.PositiveIntegerField(default=0)
     is_security  = models.BooleanField(default=False)
+    # Keycloak subject UUID — set on first SSO login, used for fast user lookup
+    keycloak_id  = models.CharField(max_length=36, blank=True, db_index=True)
     # Academic profile
     degree        = models.CharField(max_length=10, choices=DEGREE_CHOICES, blank=True)
     course        = models.CharField(max_length=100, blank=True)   # e.g. 'Computer Science'
@@ -131,28 +133,6 @@ class HelpRequest(models.Model):
             self.save(update_fields=['status'])
             return True
         return False
-
-
-# ---------------------------------------------------------------------------
-# Password Reset Token (simple token model, no email required in dev)
-# ---------------------------------------------------------------------------
-
-import uuid
-
-class PasswordResetToken(models.Model):
-    user       = models.ForeignKey(User, on_delete=models.CASCADE)
-    token      = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    used       = models.BooleanField(default=False)
-
-    def is_valid(self):
-        """Tokens expire after 15 minutes."""
-        return not self.used and (
-            timezone.now() - self.created_at
-        ).total_seconds() < 900
-
-    def __str__(self):
-        return f"ResetToken({self.user}, used={self.used})"
 
 
 # ---------------------------------------------------------------------------
