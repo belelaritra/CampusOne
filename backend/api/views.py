@@ -50,6 +50,9 @@ from .serializers import (
     RebateRequestSerializer, RebateReviewSerializer,
     # Admin Console
     AdminUserListSerializer, AdminUserUpdateSerializer,
+    ConsoleOutletSerializer, ConsoleOutletWriteSerializer,
+    ConsoleOutletAdminSerializer, ConsoleHostelSerializer,
+    ConsoleFoodOrderSerializer,
     # Contacts Module
     FacultySerializer, FacultyWriteSerializer,
     DepartmentSerializer, EmergencyContactSerializer,
@@ -2421,6 +2424,138 @@ class ConsoleSettingsViewSet(viewsets.ViewSet):
         ser.is_valid(raise_exception=True)
         ser.save()
         return Response(ser.data)
+
+
+class ConsoleOutletViewSet(viewsets.ViewSet):
+    """Staff-only: full CRUD for food outlets."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = Outlet.objects.annotate(
+            admin_count=Count('outlet_admins'),
+            menu_count=Count('menu_items'),
+        ).order_by('name')
+        return Response(ConsoleOutletSerializer(qs, many=True).data)
+
+    def create(self, request):
+        ser = ConsoleOutletWriteSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        outlet = ser.save()
+        result = ConsoleOutletSerializer(
+            Outlet.objects.annotate(
+                admin_count=Count('outlet_admins'),
+                menu_count=Count('menu_items'),
+            ).get(pk=outlet.pk)
+        )
+        return Response(result.data, status=201)
+
+    def partial_update(self, request, pk=None):
+        try:
+            outlet = Outlet.objects.get(pk=pk)
+        except Outlet.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = ConsoleOutletWriteSerializer(outlet, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        result = ConsoleOutletSerializer(
+            Outlet.objects.annotate(
+                admin_count=Count('outlet_admins'),
+                menu_count=Count('menu_items'),
+            ).get(pk=outlet.pk)
+        )
+        return Response(result.data)
+
+    def destroy(self, request, pk=None):
+        try:
+            outlet = Outlet.objects.get(pk=pk)
+        except Outlet.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        outlet.delete()
+        return Response(status=204)
+
+
+class ConsoleOutletAdminViewSet(viewsets.ViewSet):
+    """Staff-only: assign / remove outlet admins."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = OutletAdmin.objects.select_related('user', 'outlet').order_by('outlet__name')
+        return Response(ConsoleOutletAdminSerializer(qs, many=True).data)
+
+    def create(self, request):
+        ser = ConsoleOutletAdminSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(ConsoleOutletAdminSerializer(obj).data, status=201)
+
+    def destroy(self, request, pk=None):
+        try:
+            obj = OutletAdmin.objects.get(pk=pk)
+        except OutletAdmin.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        obj.delete()
+        return Response(status=204)
+
+
+class ConsoleHostelViewSet(viewsets.ViewSet):
+    """Staff-only: full CRUD for hostels."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = Hostel.objects.all().order_by('name')
+        return Response(ConsoleHostelSerializer(qs, many=True).data)
+
+    def create(self, request):
+        ser = ConsoleHostelSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        hostel = ser.save()
+        return Response(ConsoleHostelSerializer(hostel).data, status=201)
+
+    def partial_update(self, request, pk=None):
+        try:
+            hostel = Hostel.objects.get(pk=pk)
+        except Hostel.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        ser = ConsoleHostelSerializer(hostel, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ConsoleHostelSerializer(hostel).data)
+
+    def destroy(self, request, pk=None):
+        try:
+            hostel = Hostel.objects.get(pk=pk)
+        except Hostel.DoesNotExist:
+            return Response({'detail': 'Not found'}, status=404)
+        hostel.delete()
+        return Response(status=204)
+
+
+class ConsoleFoodOrderViewSet(viewsets.ViewSet):
+    """Staff-only: view all food orders with filters."""
+    permission_classes = [IsStaffUser]
+
+    def list(self, request):
+        qs = FoodOrder.objects.select_related('user', 'outlet').prefetch_related(
+            'order_items__food_item'
+        ).order_by('-created_at')
+        # Filters
+        outlet_id  = request.query_params.get('outlet')
+        status_f   = request.query_params.get('status')
+        order_type = request.query_params.get('order_type')
+        q          = request.query_params.get('q', '').strip()
+        if outlet_id:
+            qs = qs.filter(outlet_id=outlet_id)
+        if status_f:
+            qs = qs.filter(status=status_f.upper())
+        if order_type:
+            qs = qs.filter(order_type=order_type.upper())
+        if q:
+            qs = qs.filter(
+                Q(user__username__icontains=q) |
+                Q(user__full_name__icontains=q) |
+                Q(user__roll_number__icontains=q)
+            )
+        return Response(ConsoleFoodOrderSerializer(qs[:200], many=True).data)
 
 
 # ===========================================================================

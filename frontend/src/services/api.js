@@ -183,6 +183,26 @@ export const deleteConsoleRebate = (id)           => api.delete(`/console/rebate
 export const getConsoleSettings  = ()             => api.get('/console/settings/').then(r => r.data);
 export const updateConsoleSetting= (id, data)     => api.patch(`/console/settings/${id}/`, data).then(r => r.data);
 
+// Console — Outlets
+export const getConsoleOutlets    = ()           => api.get('/console/outlets/').then(r => r.data);
+export const createConsoleOutlet  = (data)       => api.post('/console/outlets/', data).then(r => r.data);
+export const updateConsoleOutlet  = (id, data)   => api.patch(`/console/outlets/${id}/`, data).then(r => r.data);
+export const deleteConsoleOutlet  = (id)         => api.delete(`/console/outlets/${id}/`).then(r => r.data);
+
+// Console — Outlet Admins
+export const getConsoleOutletAdmins   = ()       => api.get('/console/outlet-admins/').then(r => r.data);
+export const createConsoleOutletAdmin = (data)   => api.post('/console/outlet-admins/', data).then(r => r.data);
+export const deleteConsoleOutletAdmin = (id)     => api.delete(`/console/outlet-admins/${id}/`).then(r => r.data);
+
+// Console — Hostels
+export const getConsoleHostels    = ()           => api.get('/console/hostels/').then(r => r.data);
+export const createConsoleHostel  = (data)       => api.post('/console/hostels/', data).then(r => r.data);
+export const updateConsoleHostel  = (id, data)   => api.patch(`/console/hostels/${id}/`, data).then(r => r.data);
+export const deleteConsoleHostel  = (id)         => api.delete(`/console/hostels/${id}/`).then(r => r.data);
+
+// Console — Food Orders (read-only view)
+export const getConsoleFoodOrders = (params = {}) => api.get('/console/orders/', { params }).then(r => r.data);
+
 // ---------------------------------------------------------------------------
 // Contacts Module API
 // ---------------------------------------------------------------------------

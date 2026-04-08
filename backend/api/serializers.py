@@ -1054,3 +1054,92 @@ class EmergencyContactSerializer(serializers.ModelSerializer):
     class Meta:
         model  = EmergencyContact
         fields = ['id', 'service_name', 'contact', 'order']
+
+
+# ---------------------------------------------------------------------------
+# Admin Console — Outlets, Outlet Admins, Hostels, Food Orders
+# ---------------------------------------------------------------------------
+
+class ConsoleOutletSerializer(serializers.ModelSerializer):
+    admin_count = serializers.IntegerField(read_only=True)
+    menu_count  = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model  = Outlet
+        fields = ['id', 'name', 'image', 'description', 'is_active', 'created_at',
+                  'admin_count', 'menu_count']
+        read_only_fields = ['id', 'created_at', 'admin_count', 'menu_count']
+
+
+class ConsoleOutletWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Outlet
+        fields = ['name', 'image', 'description', 'is_active']
+
+    def validate_name(self, value):
+        qs = Outlet.objects.filter(name__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("An outlet with this name already exists.")
+        return value
+
+
+class ConsoleOutletAdminSerializer(serializers.ModelSerializer):
+    username    = serializers.CharField(source='user.username',   read_only=True)
+    full_name   = serializers.CharField(source='user.full_name',  read_only=True)
+    outlet_name = serializers.CharField(source='outlet.name',     read_only=True)
+    # write-only inputs
+    user_id     = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), source='user', write_only=True
+    )
+    outlet_id   = serializers.PrimaryKeyRelatedField(
+        queryset=Outlet.objects.all(), source='outlet', write_only=True
+    )
+
+    class Meta:
+        model  = OutletAdmin
+        fields = ['id', 'user_id', 'outlet_id', 'username', 'full_name', 'outlet_name']
+
+    def validate(self, data):
+        user   = data.get('user',   self.instance.user   if self.instance else None)
+        outlet = data.get('outlet', self.instance.outlet if self.instance else None)
+        qs = OutletAdmin.objects.filter(user=user)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                f"{user.username} is already assigned to an outlet."
+            )
+        return data
+
+
+class ConsoleHostelSerializer(serializers.ModelSerializer):
+    occupancy_percent = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Hostel
+        fields = ['id', 'name', 'capacity', 'occupancy', 'warden_contact', 'occupancy_percent']
+
+    def get_occupancy_percent(self, obj):
+        return round((obj.occupancy / obj.capacity) * 100) if obj.capacity else 0
+
+
+class ConsoleFoodOrderSerializer(serializers.ModelSerializer):
+    username      = serializers.CharField(source='user.username',   read_only=True)
+    outlet_name   = serializers.CharField(source='outlet.name',     read_only=True)
+    items_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = FoodOrder
+        fields = [
+            'id', 'username', 'outlet_name', 'status', 'order_type',
+            'total_price', 'delivery_location', 'payment_method',
+            'items_summary', 'created_at',
+        ]
+
+    def get_items_summary(self, obj):
+        return ', '.join(
+            f"{oi.quantity}× {oi.food_item.name}"
+            for oi in obj.order_items.select_related('food_item').all()
+        )

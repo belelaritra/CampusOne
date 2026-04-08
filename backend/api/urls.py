@@ -50,6 +50,18 @@ console_rebate_router.register(r'rebates', views.ConsoleRebateViewSet, basename=
 console_settings_router = DefaultRouter()
 console_settings_router.register(r'settings', views.ConsoleSettingsViewSet, basename='console-settings')
 
+console_outlet_router = DefaultRouter()
+console_outlet_router.register(r'outlets', views.ConsoleOutletViewSet, basename='console-outlet')
+
+console_outlet_admin_router = DefaultRouter()
+console_outlet_admin_router.register(r'outlet-admins', views.ConsoleOutletAdminViewSet, basename='console-outlet-admin')
+
+console_hostel_router = DefaultRouter()
+console_hostel_router.register(r'hostels', views.ConsoleHostelViewSet, basename='console-hostel')
+
+console_orders_router = DefaultRouter()
+console_orders_router.register(r'orders', views.ConsoleFoodOrderViewSet, basename='console-orders')
+
 # ---------------------------------------------------------------------------
 # Contacts Module routers
 # ---------------------------------------------------------------------------
@@ -133,6 +145,10 @@ urlpatterns = [
     path('console/', include(console_coupon_router.urls)),
     path('console/', include(console_rebate_router.urls)),
     path('console/', include(console_settings_router.urls)),
+    path('console/', include(console_outlet_router.urls)),
+    path('console/', include(console_outlet_admin_router.urls)),
+    path('console/', include(console_hostel_router.urls)),
+    path('console/', include(console_orders_router.urls)),
 
     # --- Contacts Module ---
     path('contacts/', include(faculty_router.urls)),

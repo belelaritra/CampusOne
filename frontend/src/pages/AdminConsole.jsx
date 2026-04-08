@@ -8,9 +8,13 @@ import {
   getConsoleCoupons, deleteConsoleCoupon,
   getConsoleRebates, reviewConsoleRebate, deleteConsoleRebate,
   getConsoleSettings, updateConsoleSetting,
+  getConsoleOutlets, createConsoleOutlet, updateConsoleOutlet, deleteConsoleOutlet,
+  getConsoleOutletAdmins, createConsoleOutletAdmin, deleteConsoleOutletAdmin,
+  getConsoleHostels, createConsoleHostel, updateConsoleHostel, deleteConsoleHostel,
+  getConsoleFoodOrders,
 } from '../services/api';
 
-const TABS = ['Overview', 'Users', 'Menus', 'Coupons', 'Rebates', 'Settings'];
+const TABS = ['Overview', 'Users', 'Outlets', 'Outlet Admins', 'Hostels', 'Orders', 'Menus', 'Coupons', 'Rebates', 'Settings'];
 
 /* ── small helpers ────────────────────────────────────────────────── */
 function Pill({ label, color }) {
@@ -595,6 +599,501 @@ function SettingsTab() {
   );
 }
 
+/* ── Tab: Outlets ─────────────────────────────────────────────────── */
+function OutletsTab() {
+  const [outlets, setOutlets] = useState([]);
+  const [err,     setErr]     = useState('');
+  const [editing, setEditing] = useState(null);   // null = closed, 'new' = create, obj = edit
+  const [form,    setForm]    = useState({});
+  const [saving,  setSaving]  = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [busy,    setBusy]    = useState({});
+
+  const load = useCallback(() => {
+    getConsoleOutlets()
+      .then(data => setOutlets(Array.isArray(data) ? data : data.results ?? []))
+      .catch(() => setErr('Failed to load outlets.'));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  function openNew() {
+    setEditing('new');
+    setForm({ name: '', image: '', description: '', is_active: true });
+    setSaveErr('');
+  }
+  function openEdit(o) {
+    setEditing(o);
+    setForm({ name: o.name, image: o.image || '', description: o.description || '', is_active: o.is_active });
+    setSaveErr('');
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setSaveErr('');
+    try {
+      if (editing === 'new') {
+        await createConsoleOutlet(form);
+      } else {
+        await updateConsoleOutlet(editing.id, form);
+      }
+      setEditing(null);
+      load();
+    } catch (err) {
+      const d = err.response?.data;
+      setSaveErr(d?.name?.[0] || d?.detail || 'Save failed.');
+    } finally { setSaving(false); }
+  }
+
+  async function del(id) {
+    setBusy(p => ({ ...p, [id]: true }));
+    try { await deleteConsoleOutlet(id); setOutlets(p => p.filter(o => o.id !== id)); }
+    catch { setErr('Delete failed — outlet may have active orders.'); }
+    finally { setBusy(p => ({ ...p, [id]: false })); }
+  }
+
+  async function toggleActive(o) {
+    setBusy(p => ({ ...p, [o.id]: true }));
+    try {
+      const updated = await updateConsoleOutlet(o.id, { is_active: !o.is_active });
+      setOutlets(p => p.map(x => x.id === o.id ? { ...x, ...updated } : x));
+    } catch { setErr('Update failed.'); }
+    finally { setBusy(p => ({ ...p, [o.id]: false })); }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <button className="btn btn-primary" onClick={openNew}>+ Add Outlet</button>
+      </div>
+      {err && <p style={{ color: '#dc2626' }}>{err}</p>}
+
+      {editing !== null && (
+        <div style={MODAL_BG}>
+          <div style={MODAL_BOX}>
+            <h3 style={{ marginTop: 0 }}>{editing === 'new' ? 'New Outlet' : `Edit: ${editing.name}`}</h3>
+            {saveErr && <div className="auth-error" style={{ marginBottom: '0.75rem' }}>{saveErr}</div>}
+            <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <FG label="Outlet Name *">
+                <input className="search-input" required value={form.name}
+                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+              </FG>
+              <FG label="Image URL">
+                <input className="search-input" placeholder="https://…" value={form.image}
+                  onChange={e => setForm(p => ({ ...p, image: e.target.value }))} />
+              </FG>
+              <FG label="Description">
+                <textarea className="search-input" rows={3} value={form.description}
+                  onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                  style={{ resize: 'vertical' }} />
+              </FG>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+                <input type="checkbox" checked={form.is_active}
+                  onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
+                Active (visible to students)
+              </label>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                <button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={TABLE_STYLE}>
+          <thead>
+            <tr style={{ background: 'var(--bg-secondary,#f0f4fa)' }}>
+              <Th>Name</Th><Th>Status</Th><Th>Admins</Th><Th>Menu Items</Th><Th>Description</Th><Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {outlets.map(o => (
+              <tr key={o.id} style={{ borderBottom: '1px solid var(--border-color,#e5e7eb)' }}>
+                <Td><strong>{o.name}</strong></Td>
+                <Td><Pill label={o.is_active ? 'Open' : 'Closed'} color={o.is_active ? 'green' : 'red'} /></Td>
+                <Td>{o.admin_count ?? '—'}</Td>
+                <Td>{o.menu_count ?? '—'}</Td>
+                <Td style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {o.description || <em style={{ color: 'var(--text-secondary)' }}>—</em>}
+                </Td>
+                <Td>
+                  <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                    <button className="btn btn-primary" disabled={busy[o.id]}
+                      style={{ padding: '0.2rem 0.7rem', fontSize: '0.78rem' }}
+                      onClick={() => openEdit(o)}>Edit</button>
+                    <button className="btn" disabled={busy[o.id]}
+                      style={{ padding: '0.2rem 0.7rem', fontSize: '0.78rem' }}
+                      onClick={() => toggleActive(o)}>{o.is_active ? 'Close' : 'Open'}</button>
+                    <ConfirmBtn danger disabled={busy[o.id]} onConfirm={() => del(o.id)}>Delete</ConfirmBtn>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+            {outlets.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)' }}>No outlets found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Outlet Admins ───────────────────────────────────────────── */
+function OutletAdminsTab() {
+  const [admins,  setAdmins]  = useState([]);
+  const [outlets, setOutlets] = useState([]);
+  const [users,   setUsers]   = useState([]);
+  const [err,     setErr]     = useState('');
+  const [adding,  setAdding]  = useState(false);
+  const [form,    setForm]    = useState({ user_id: '', outlet_id: '' });
+  const [saving,  setSaving]  = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [busy,    setBusy]    = useState({});
+
+  const load = useCallback(() => {
+    Promise.all([
+      getConsoleOutletAdmins(),
+      getConsoleOutlets(),
+      getConsoleUsers(),
+    ]).then(([a, o, u]) => {
+      setAdmins(Array.isArray(a) ? a : a.results ?? []);
+      setOutlets(Array.isArray(o) ? o : o.results ?? []);
+      setUsers(Array.isArray(u) ? u : u.results ?? []);
+    }).catch(() => setErr('Failed to load data.'));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function assign(e) {
+    e.preventDefault();
+    setSaving(true); setSaveErr('');
+    try {
+      await createConsoleOutletAdmin({ user_id: Number(form.user_id), outlet_id: Number(form.outlet_id) });
+      setAdding(false);
+      load();
+    } catch (err) {
+      const d = err.response?.data;
+      setSaveErr(d?.non_field_errors?.[0] || d?.detail || 'Assignment failed.');
+    } finally { setSaving(false); }
+  }
+
+  async function remove(id) {
+    setBusy(p => ({ ...p, [id]: true }));
+    try { await deleteConsoleOutletAdmin(id); setAdmins(p => p.filter(a => a.id !== id)); }
+    catch { setErr('Remove failed.'); }
+    finally { setBusy(p => ({ ...p, [id]: false })); }
+  }
+
+  const availableUsers = users.filter(u => !admins.find(a => a.username === u.username));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <button className="btn btn-primary" onClick={() => { setAdding(true); setForm({ user_id: '', outlet_id: '' }); setSaveErr(''); }}>
+          + Assign Outlet Admin
+        </button>
+      </div>
+      {err && <p style={{ color: '#dc2626' }}>{err}</p>}
+
+      {adding && (
+        <div style={MODAL_BG}>
+          <div style={MODAL_BOX}>
+            <h3 style={{ marginTop: 0 }}>Assign Outlet Admin</h3>
+            {saveErr && <div className="auth-error" style={{ marginBottom: '0.75rem' }}>{saveErr}</div>}
+            <form onSubmit={assign} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <FG label="User *">
+                <select className="search-input" required value={form.user_id}
+                  onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))}>
+                  <option value="">— Select user —</option>
+                  {availableUsers.map(u => (
+                    <option key={u.id} value={u.id}>{u.username}{u.full_name ? ` — ${u.full_name}` : ''}</option>
+                  ))}
+                </select>
+              </FG>
+              <FG label="Outlet *">
+                <select className="search-input" required value={form.outlet_id}
+                  onChange={e => setForm(p => ({ ...p, outlet_id: e.target.value }))}>
+                  <option value="">— Select outlet —</option>
+                  {outlets.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </FG>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Assign'}</button>
+                <button type="button" className="btn" onClick={() => setAdding(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={TABLE_STYLE}>
+          <thead>
+            <tr style={{ background: 'var(--bg-secondary,#f0f4fa)' }}>
+              <Th>Username</Th><Th>Full Name</Th><Th>Outlet</Th><Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {admins.map(a => (
+              <tr key={a.id} style={{ borderBottom: '1px solid var(--border-color,#e5e7eb)' }}>
+                <Td>{a.username}</Td>
+                <Td>{a.full_name || <em style={{ color: 'var(--text-secondary)' }}>—</em>}</Td>
+                <Td><Pill label={a.outlet_name} color="yellow" /></Td>
+                <Td>
+                  <ConfirmBtn danger disabled={busy[a.id]} onConfirm={() => remove(a.id)}>Remove</ConfirmBtn>
+                </Td>
+              </tr>
+            ))}
+            {admins.length === 0 && (
+              <tr><td colSpan={4} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)' }}>No outlet admins assigned.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Hostels ─────────────────────────────────────────────────── */
+function HostelsTab() {
+  const [hostels, setHostels] = useState([]);
+  const [err,     setErr]     = useState('');
+  const [editing, setEditing] = useState(null);
+  const [form,    setForm]    = useState({});
+  const [saving,  setSaving]  = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [busy,    setBusy]    = useState({});
+
+  const EMPTY = { name: '', capacity: '', occupancy: '', warden_contact: '' };
+
+  const load = useCallback(() => {
+    getConsoleHostels()
+      .then(data => setHostels(Array.isArray(data) ? data : data.results ?? []))
+      .catch(() => setErr('Failed to load hostels.'));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  function openNew()  { setEditing('new'); setForm(EMPTY); setSaveErr(''); }
+  function openEdit(h){ setEditing(h); setForm({ name: h.name, capacity: h.capacity, occupancy: h.occupancy, warden_contact: h.warden_contact || '' }); setSaveErr(''); }
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setSaveErr('');
+    const payload = { ...form, capacity: Number(form.capacity), occupancy: Number(form.occupancy) };
+    try {
+      if (editing === 'new') { await createConsoleHostel(payload); }
+      else { await updateConsoleHostel(editing.id, payload); }
+      setEditing(null); load();
+    } catch (err) {
+      const d = err.response?.data;
+      setSaveErr(d?.name?.[0] || d?.detail || 'Save failed.');
+    } finally { setSaving(false); }
+  }
+
+  async function del(id) {
+    setBusy(p => ({ ...p, [id]: true }));
+    try { await deleteConsoleHostel(id); setHostels(p => p.filter(h => h.id !== id)); }
+    catch { setErr('Delete failed.'); }
+    finally { setBusy(p => ({ ...p, [id]: false })); }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <button className="btn btn-primary" onClick={openNew}>+ Add Hostel</button>
+      </div>
+      {err && <p style={{ color: '#dc2626' }}>{err}</p>}
+
+      {editing !== null && (
+        <div style={MODAL_BG}>
+          <div style={MODAL_BOX}>
+            <h3 style={{ marginTop: 0 }}>{editing === 'new' ? 'New Hostel' : `Edit: ${editing.name}`}</h3>
+            {saveErr && <div className="auth-error" style={{ marginBottom: '0.75rem' }}>{saveErr}</div>}
+            <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.9rem' }}>
+                <FG label="Hostel Name *" style={{ gridColumn: '1/-1' }}>
+                  <input className="search-input" required value={form.name}
+                    onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+                </FG>
+                <FG label="Capacity *">
+                  <input type="number" min="0" className="search-input" required value={form.capacity}
+                    onChange={e => setForm(p => ({ ...p, capacity: e.target.value }))} />
+                </FG>
+                <FG label="Occupancy">
+                  <input type="number" min="0" className="search-input" value={form.occupancy}
+                    onChange={e => setForm(p => ({ ...p, occupancy: e.target.value }))} />
+                </FG>
+                <FG label="Warden Contact" style={{ gridColumn: '1/-1' }}>
+                  <input className="search-input" value={form.warden_contact}
+                    onChange={e => setForm(p => ({ ...p, warden_contact: e.target.value }))} />
+                </FG>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                <button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={TABLE_STYLE}>
+          <thead>
+            <tr style={{ background: 'var(--bg-secondary,#f0f4fa)' }}>
+              <Th>Name</Th><Th>Capacity</Th><Th>Occupancy</Th><Th>Fill %</Th><Th>Warden Contact</Th><Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {hostels.map(h => (
+              <tr key={h.id} style={{ borderBottom: '1px solid var(--border-color,#e5e7eb)' }}>
+                <Td><strong>{h.name}</strong></Td>
+                <Td>{h.capacity}</Td>
+                <Td>{h.occupancy}</Td>
+                <Td>
+                  <Pill
+                    label={`${h.occupancy_percent ?? 0}%`}
+                    color={h.occupancy_percent >= 90 ? 'red' : h.occupancy_percent >= 70 ? 'yellow' : 'green'}
+                  />
+                </Td>
+                <Td>{h.warden_contact || <em style={{ color: 'var(--text-secondary)' }}>—</em>}</Td>
+                <Td>
+                  <div style={{ display: 'flex', gap: '0.3rem' }}>
+                    <button className="btn btn-primary" disabled={busy[h.id]}
+                      style={{ padding: '0.2rem 0.7rem', fontSize: '0.78rem' }}
+                      onClick={() => openEdit(h)}>Edit</button>
+                    <ConfirmBtn danger disabled={busy[h.id]} onConfirm={() => del(h.id)}>Delete</ConfirmBtn>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+            {hostels.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)' }}>No hostels found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Food Orders ─────────────────────────────────────────────── */
+const ORDER_STATUS_OPTIONS = [
+  '', 'PENDING', 'ACCEPTED', 'PREPARING', 'OUT_FOR_DELIVERY', 'READY', 'DELIVERED', 'TOOK', 'CANCELLED',
+];
+const ORDER_STATUS_COLOR = {
+  PENDING: 'yellow', ACCEPTED: 'blue', PREPARING: 'blue',
+  OUT_FOR_DELIVERY: 'blue', READY: 'blue',
+  DELIVERED: 'green', TOOK: 'green', CANCELLED: 'red',
+};
+
+function OrdersTab() {
+  const [orders,  setOrders]  = useState([]);
+  const [outlets, setOutlets] = useState([]);
+  const [err,     setErr]     = useState('');
+  const [filters, setFilters] = useState({ outlet: '', status: '', order_type: '', q: '' });
+
+  const load = useCallback(() => {
+    const params = {};
+    if (filters.outlet)     params.outlet     = filters.outlet;
+    if (filters.status)     params.status     = filters.status;
+    if (filters.order_type) params.order_type = filters.order_type;
+    if (filters.q)          params.q          = filters.q;
+    getConsoleFoodOrders(params)
+      .then(data => setOrders(Array.isArray(data) ? data : data.results ?? []))
+      .catch(() => setErr('Failed to load orders.'));
+  }, [filters]);
+
+  useEffect(() => {
+    getConsoleOutlets()
+      .then(data => setOutlets(Array.isArray(data) ? data : data.results ?? []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fld = (key, label, children) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{label}</label>
+      {children}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        {fld('q', 'Search user',
+          <input className="search-input" placeholder="Username / roll…" value={filters.q}
+            onChange={e => setFilters(p => ({ ...p, q: e.target.value }))}
+            style={{ minWidth: 160 }} />
+        )}
+        {fld('outlet', 'Outlet',
+          <select className="search-input" value={filters.outlet}
+            onChange={e => setFilters(p => ({ ...p, outlet: e.target.value }))}>
+            <option value="">All outlets</option>
+            {outlets.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )}
+        {fld('status', 'Status',
+          <select className="search-input" value={filters.status}
+            onChange={e => setFilters(p => ({ ...p, status: e.target.value }))}>
+            {ORDER_STATUS_OPTIONS.map((s, i) => <option key={i} value={s}>{s || 'All statuses'}</option>)}
+          </select>
+        )}
+        {fld('order_type', 'Type',
+          <select className="search-input" value={filters.order_type}
+            onChange={e => setFilters(p => ({ ...p, order_type: e.target.value }))}>
+            <option value="">All types</option>
+            <option value="DELIVERY">Delivery</option>
+            <option value="TAKEAWAY">Takeaway</option>
+          </select>
+        )}
+        <button className="btn btn-primary" onClick={load}>Search</button>
+      </div>
+
+      {err && <p style={{ color: '#dc2626' }}>{err}</p>}
+      <div style={{ marginBottom: '0.5rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+        Showing {orders.length} order{orders.length !== 1 ? 's' : ''} (max 200)
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={TABLE_STYLE}>
+          <thead>
+            <tr style={{ background: 'var(--bg-secondary,#f0f4fa)' }}>
+              <Th>#</Th><Th>User</Th><Th>Outlet</Th><Th>Status</Th><Th>Type</Th>
+              <Th>Total</Th><Th>Items</Th><Th>Location</Th><Th>Placed</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map(o => (
+              <tr key={o.id} style={{ borderBottom: '1px solid var(--border-color,#e5e7eb)' }}>
+                <Td style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>#{o.id}</Td>
+                <Td>{o.username}</Td>
+                <Td>{o.outlet_name}</Td>
+                <Td><Pill label={o.status} color={ORDER_STATUS_COLOR[o.status] || 'gray'} /></Td>
+                <Td><Pill label={o.order_type} color={o.order_type === 'DELIVERY' ? 'blue' : 'gray'} /></Td>
+                <Td>₹{o.total_price}</Td>
+                <Td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {o.items_summary || '—'}
+                </Td>
+                <Td style={{ fontSize: '0.8rem' }}>{o.delivery_location || '—'}</Td>
+                <Td style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                  {o.created_at ? new Date(o.created_at).toLocaleString() : '—'}
+                </Td>
+              </tr>
+            ))}
+            {orders.length === 0 && (
+              <tr><td colSpan={9} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)' }}>No orders found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SettRow({ label, value }) {
   return (
     <>
@@ -669,12 +1168,16 @@ export default function AdminConsole() {
         ))}
       </div>
 
-      {tab === 'Overview'  && <OverviewTab />}
-      {tab === 'Users'     && <UsersTab />}
-      {tab === 'Menus'     && <MenusTab />}
-      {tab === 'Coupons'   && <CouponsTab />}
-      {tab === 'Rebates'   && <RebatesTab />}
-      {tab === 'Settings'  && <SettingsTab />}
+      {tab === 'Overview'      && <OverviewTab />}
+      {tab === 'Users'         && <UsersTab />}
+      {tab === 'Outlets'       && <OutletsTab />}
+      {tab === 'Outlet Admins' && <OutletAdminsTab />}
+      {tab === 'Hostels'       && <HostelsTab />}
+      {tab === 'Orders'        && <OrdersTab />}
+      {tab === 'Menus'         && <MenusTab />}
+      {tab === 'Coupons'       && <CouponsTab />}
+      {tab === 'Rebates'       && <RebatesTab />}
+      {tab === 'Settings'      && <SettingsTab />}
     </section>
   );
 }

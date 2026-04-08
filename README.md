@@ -21,7 +21,7 @@ Install these once on your machine before anything else.
 
 ## Running the Project
 
-### First time (fresh clone)
+### Option A — Single command (recommended)
 
 ```bash
 git clone <repo-url>
@@ -30,34 +30,80 @@ chmod +x run.sh
 ./run.sh
 ```
 
-The script will:
-1. Check all prerequisites
-2. Ask if you want the Telegram bot (yes/no)
-3. If yes — ask for your bot token (get it from [@BotFather](https://t.me/BotFather) on Telegram)
-4. Write all `.env` files automatically
-5. Start Docker → wait for Keycloak → configure realm
-6. Create Python venv → install packages → run migrations
-7. Prompt you to create a Django superuser (first time only)
-8. Sync users to Keycloak
-9. Start frontend (Vite)
-10. Start bot (if selected)
+The script handles everything automatically:
+1. Checks prerequisites
+2. Asks if you want the Telegram bot (or use `--bot` / `--no-bot` to skip the prompt)
+3. Writes all `.env` files
+4. Starts Docker → waits for Keycloak → configures realm
+5. Creates Python venv → installs packages → runs migrations
+6. Prompts for Django superuser credentials (default: `admin` / `admin`)
+7. Syncs users to Keycloak
+8. Starts Vite frontend
+9. Starts bot (if selected)
 
-Everything runs in one terminal. Press `Ctrl+C` to stop all services cleanly.
-
-### Every time after that
+Press `Ctrl+C` to stop everything cleanly.
 
 ```bash
-./run.sh
+./run.sh --bot      # always include bot (skips prompt)
+./run.sh --no-bot   # always skip bot
+./run.sh --reset    # wipe Keycloak DB and reconfigure from scratch
 ```
 
-Same command. It detects what's already set up and skips those steps.
+---
 
-### Options
+### Option B — Run each service manually
+
+Use separate terminals for each service.
+
+#### 1. Docker (Keycloak + PostgreSQL)
 
 ```bash
-./run.sh --bot      # always include bot (skips the prompt)
-./run.sh --no-bot   # always skip bot (skips the prompt)
-./run.sh --reset    # wipe Keycloak DB and reconfigure from scratch
+docker compose up -d
+# First time only — configure Keycloak realm:
+chmod +x keycloak/setup-realm.sh && ./keycloak/setup-realm.sh
+```
+
+Wait ~30s for Keycloak to be ready at http://localhost:8080.
+
+#### 2. Django backend
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+# First time only — create superuser:
+DJANGO_SUPERUSER_USERNAME=admin DJANGO_SUPERUSER_PASSWORD=admin \
+  DJANGO_SUPERUSER_EMAIL=admin@campusone.local \
+  python manage.py createsuperuser --noinput
+python manage.py sync_keycloak
+python manage.py runserver 0.0.0.0:8000
+```
+
+#### 3. React frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+#### 4. Telegram bot (optional)
+
+```bash
+cd bot
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+# Ensure bot/.env has TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_SECRET set
+python bot.py
+```
+
+#### Stop Docker when done
+
+```bash
+docker compose down
 ```
 
 ---
@@ -79,7 +125,7 @@ Once running:
 |---|---|---|
 | Keycloak Admin | `admin` | `admin` |
 | Test Staff User | `campus_admin` | `Admin@123` |
-| Django Admin | *(set by you during first run)* | |
+| Django Admin | `admin` (or chosen at first run) | `admin` (or chosen at first run) |
 
 ---
 
@@ -192,6 +238,52 @@ cp bot/.env.example bot/.env
 | User logs in but blank profile | `cd backend && source venv/bin/activate && python manage.py sync_keycloak` |
 | Bot: "No account found" | Save your phone number in Profile on the web app first |
 | Bot: 403 errors | `TELEGRAM_BOT_SECRET` mismatch — re-run `./run.sh` to regenerate |
+
+---
+
+## Full Reset (Clean Slate)
+
+Wipes everything — Docker volumes, databases, venvs, node_modules, caches, and generated env files — so the next `./run.sh` starts completely fresh.
+
+```bash
+# Stop all running services first (Ctrl+C if run.sh is active), then:
+
+docker compose down -v                          # stop containers + wipe Keycloak DB volume
+
+rm -f backend/db.sqlite3                        # Django database
+rm -f backend/.env bot/.env frontend/.env.local # generated env files
+rm -f .campusone.log .campusone.pids            # log and PID files
+
+rm -rf backend/venv                             # Python virtualenv (backend)
+rm -rf bot/venv                                 # Python virtualenv (bot)
+rm -rf frontend/node_modules                    # Node dependencies
+rm -rf frontend/.vite                           # Vite cache
+
+find . -type d -name __pycache__ \
+  -not -path "*/node_modules/*" \
+  -exec rm -rf {} + 2>/dev/null || true         # Python bytecode cache
+
+find . -name "*.pyc" \
+  -not -path "*/node_modules/*" \
+  -delete 2>/dev/null || true
+```
+
+Then start fresh:
+
+```bash
+./run.sh
+```
+
+> **One-liner** (copy-paste the whole block):
+> ```bash
+> docker compose down -v && \
+> rm -f backend/db.sqlite3 backend/.env bot/.env frontend/.env.local .campusone.log .campusone.pids && \
+> rm -rf backend/venv bot/venv frontend/node_modules frontend/.vite frontend/dist && \
+> find . -not -path "*/node_modules/*" -not -path "*/.git/*" \
+>   \( -type d -name __pycache__ -o -name "*.pyc" \) \
+>   -exec rm -rf {} + 2>/dev/null; \
+> ./run.sh
+> ```
 
 ---
 
