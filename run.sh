@@ -136,8 +136,55 @@ check_cmd npm      "Install npm (comes with Node.js)"
 check_cmd jq       "Install jq: brew install jq"
 check_cmd curl     "Install curl: brew install curl"
 
+# Verify Docker daemon is actually running
+info "Checking Docker daemon..."
+if ! docker info > /dev/null 2>&1; then
+  err "Docker daemon is not running."
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}To fix this:${RESET}"
+  echo -e "  ${WHITE}1. Open Docker Desktop from your Applications folder${RESET}"
+  echo -e "  ${WHITE}2. Wait for the whale icon to appear in your menu bar${RESET}"
+  echo -e "  ${WHITE}3. Re-run: ${BOLD}./run.sh${RESET}"
+  echo ""
+  exit 1
+fi
+ok "Docker daemon is running"
+
+# Helper: free a port if something is already listening on it
+free_port() {
+  local port="$1"
+  local name="$2"
+  local pids
+  pids=$(lsof -ti tcp:"$port" 2>/dev/null || true)
+  if [[ -n "$pids" ]]; then
+    warn "Port $port is already in use by PID(s) $pids — killing for $name..."
+    echo "$pids" | xargs kill -9 2>/dev/null || true
+    sleep 1
+    ok "Port $port is now free"
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 1 — Bot mode selection
+# STEP 1 — App account credentials (Keycloak campusone realm login)
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTE: Keycloak enforces length(8) — password must be ≥8 characters.
+# Django admin (/admin) is always:  admin / admin  (no prompt needed)
+# ─────────────────────────────────────────────────────────────────────────────
+step "App Account Setup"
+echo -e "${DIM}  This account is used to log in to the CampusOne app (Keycloak campusone realm)${RESET}"
+echo -e "${DIM}  Password must be ≥8 characters. Enter username and password space-separated.${RESET}"
+echo ""
+read -rp "  Username Password [campusone campusone12345]: " APP_USER APP_PASS
+APP_USER="${APP_USER:-campusone}"
+APP_PASS="${APP_PASS:-campusone12345}"
+ok "App credentials set → ${APP_USER} / ${APP_PASS}"
+
+# Django admin is always admin/admin — hardcoded, separate from app login
+DJANGO_ADMIN_USER="admin"
+DJANGO_ADMIN_PASS="admin"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2 — Bot mode selection
 # ─────────────────────────────────────────────────────────────────────────────
 step "Telegram Bot Configuration"
 
@@ -187,7 +234,7 @@ if [[ "$USE_BOT" == "true" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2 — Write .env files
+# STEP 3 — Write .env files
 # ─────────────────────────────────────────────────────────────────────────────
 step "Writing Environment Files"
 
@@ -237,7 +284,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3 — Docker / Keycloak
+# STEP 4 — Docker / Keycloak
 # ─────────────────────────────────────────────────────────────────────────────
 step "Starting Docker Services (Keycloak + PostgreSQL)"
 
@@ -278,12 +325,48 @@ if [[ "$REALM_EXISTS" == "campusone" ]]; then
 else
   info "Configuring Keycloak realm..."
   chmod +x "$SCRIPT_DIR/keycloak/setup-realm.sh"
-  "$SCRIPT_DIR/keycloak/setup-realm.sh" >> "$LOG_FILE" 2>&1 || die "Keycloak realm setup failed. Check: $LOG_FILE"
+  APP_ADMIN_USER="$APP_USER" APP_ADMIN_PASS="$APP_PASS" \
+    "$SCRIPT_DIR/keycloak/setup-realm.sh" >> "$LOG_FILE" 2>&1 || die "Keycloak realm setup failed. Check: $LOG_FILE"
   ok "Keycloak realm configured"
 fi
 
+# Always sync admin user into campusone realm with the chosen credentials
+info "Syncing admin user '${APP_USER}' into Keycloak campusone realm..."
+KC_TOKEN=$(curl -s -X POST "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password&client_id=admin-cli&username=admin&password=admin" \
+  | jq -r '.access_token')
+
+KC_USER_ID=$(curl -s "http://localhost:8080/admin/realms/campusone/users?username=${APP_USER}&exact=true" \
+  -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json" \
+  | jq -r '.[0].id // empty')
+
+if [[ -z "$KC_USER_ID" ]]; then
+  curl -s -o /dev/null -X POST "http://localhost:8080/admin/realms/campusone/users" \
+    -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"username\":\"${APP_USER}\",\"email\":\"${APP_USER}@campusone.local\",\"firstName\":\"Campus\",\"lastName\":\"Admin\",\"enabled\":true,\"emailVerified\":true,\"credentials\":[{\"type\":\"password\",\"value\":\"${APP_PASS}\",\"temporary\":false}]}"
+  KC_USER_ID=$(curl -s "http://localhost:8080/admin/realms/campusone/users?username=${APP_USER}&exact=true" \
+    -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json" \
+    | jq -r '.[0].id')
+  ok "Keycloak campusone user '${APP_USER}' created"
+else
+  curl -s -o /dev/null -X PUT "http://localhost:8080/admin/realms/campusone/users/${KC_USER_ID}/reset-password" \
+    -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"type\":\"password\",\"value\":\"${APP_PASS}\",\"temporary\":false}"
+  ok "Keycloak campusone user '${APP_USER}' password synced"
+fi
+
+# Assign campus-staff role (idempotent — Keycloak ignores duplicates)
+ROLE_REP=$(curl -s "http://localhost:8080/admin/realms/campusone/roles/campus-staff" \
+  -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json")
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/admin/realms/campusone/users/${KC_USER_ID}/role-mappings/realm" \
+  -H "Authorization: Bearer $KC_TOKEN" -H "Content-Type: application/json" \
+  -d "[$ROLE_REP]"
+ok "campus-staff role ensured for '${APP_USER}'"
+
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 4 — Backend (Python / Django)
+# STEP 5 — Backend (Python / Django)
 # ─────────────────────────────────────────────────────────────────────────────
 step "Setting Up Django Backend"
 
@@ -313,22 +396,27 @@ info "Running database migrations..."
 python manage.py migrate --no-input >> "$LOG_FILE" 2>&1 || die "Migrations failed. Check: $LOG_FILE"
 ok "Migrations applied"
 
-# Create superuser if none exists
-SUPERUSER_COUNT=$(python manage.py shell -c "from api.models import User; print(User.objects.filter(is_superuser=True).count())" 2>/dev/null || echo "0")
-if [[ "$SUPERUSER_COUNT" == "0" ]]; then
-  echo ""
-  echo -e "${YELLOW}${BOLD}  No superuser found — create one now${RESET}"
-  echo -e "${DIM}  This account will be used to access /admin and the Django Admin panel${RESET}"
-  echo ""
-  python manage.py createsuperuser || warn "Superuser creation skipped"
-else
-  info "Superuser already exists — skipping"
-fi
+# Always ensure Django superuser (admin/admin) for /admin panel
+info "Ensuring Django superuser '${DJANGO_ADMIN_USER}'..."
+python manage.py shell -c "
+from api.models import User
+u, created = User.objects.get_or_create(username='${DJANGO_ADMIN_USER}', defaults={'email': '${DJANGO_ADMIN_USER}@campusone.local'})
+u.set_password('${DJANGO_ADMIN_PASS}')
+u.is_superuser = True
+u.is_staff = True
+u.save()
+print('created' if created else 'updated')
+" 2>/dev/null | tail -1 | grep -q "created\|updated" \
+  && ok "Django superuser '${DJANGO_ADMIN_USER}' ready (${DJANGO_ADMIN_PASS})" \
+  || warn "Django superuser setup failed — check $LOG_FILE"
 
-# Sync users to Keycloak (skip if already done)
-info "Syncing users to Keycloak (--dry-run safe)..."
+# Sync users to Keycloak
+info "Syncing users to Keycloak..."
 python manage.py sync_keycloak >> "$LOG_FILE" 2>&1 || warn "sync_keycloak failed (non-fatal) — check $LOG_FILE"
 ok "Keycloak sync done"
+
+# Ensure port 8000 is free before starting Django
+free_port 8000 "Django"
 
 # Start Django in background
 info "Starting Django development server..."
@@ -346,7 +434,7 @@ fi
 deactivate
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5 — Frontend (Node / Vite)
+# STEP 6 — Frontend (Node / Vite)
 # ─────────────────────────────────────────────────────────────────────────────
 step "Setting Up React Frontend"
 
@@ -357,6 +445,7 @@ info "Installing Node.js dependencies..."
 npm install --silent >> "$LOG_FILE" 2>&1 || die "npm install failed. Check: $LOG_FILE"
 ok "Node dependencies installed"
 
+free_port 5173 "Vite"
 info "Starting Vite dev server..."
 npm run dev >> "$LOG_FILE" 2>&1 &
 VITE_PID=$!
@@ -370,7 +459,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — Telegram Bot (optional)
+# STEP 7 — Telegram Bot (optional)
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "$USE_BOT" == "true" ]]; then
   step "Setting Up Telegram Bot"
@@ -430,8 +519,9 @@ fi
 echo -e "  ║  ${RESET}${DIM}  Log file${GREEN}${BOLD}            →  .campusone.log                   ║"
 echo "  ║                                                                  ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
-echo -e "  ║  ${RESET}${YELLOW}  Keycloak Admin Login${GREEN}${BOLD}  admin / admin                      ║"
-echo -e "  ║  ${RESET}${YELLOW}  Test Staff Login${GREEN}${BOLD}      campus_admin / Admin@123           ║"
+echo -e "  ║  ${RESET}${YELLOW}  Keycloak Master Admin${GREEN}${BOLD} admin / admin                      ║"
+echo -e "  ║  ${RESET}${YELLOW}  Django Admin (/admin)${GREEN}${BOLD} ${DJANGO_ADMIN_USER} / ${DJANGO_ADMIN_PASS}                      ║"
+echo -e "  ║  ${RESET}${YELLOW}  App Login (Keycloak)${GREEN}${BOLD}  ${APP_USER} / ${APP_PASS}              ║"
 echo "  ║                                                                  ║"
 echo -e "  ║  ${RESET}${DIM}  Press Ctrl+C to stop all services${GREEN}${BOLD}                       ║"
 echo "  ╚══════════════════════════════════════════════════════════════════╝"

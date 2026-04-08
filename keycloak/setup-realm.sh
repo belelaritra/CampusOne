@@ -18,6 +18,10 @@ KC_ADMIN="admin"
 KC_ADMIN_PASS="admin"
 REALM="campusone"
 
+# Admin user for the campusone realm — passed from run.sh, default admin/admin
+APP_ADMIN_USER="${APP_ADMIN_USER:-campusone}"
+APP_ADMIN_PASS="${APP_ADMIN_PASS:-campusone12345}"
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
@@ -121,32 +125,36 @@ CLIENT_ID=$(curl -s "$KC_URL/admin/realms/$REALM/clients?clientId=campusone-fron
 log "  Frontend client internal ID: $CLIENT_ID"
 
 # ---------------------------------------------------------------------------
-# 6. Create a test admin user (optional — remove in production)
+# 6. Create admin user in campusone realm
 # ---------------------------------------------------------------------------
-log "Creating test admin user 'campus_admin'..."
+log "Creating campusone admin user '${APP_ADMIN_USER}'..."
 USER_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$KC_URL/admin/realms/$REALM/users" \
   "${AUTH[@]}" \
-  -d '{
-    "username": "campus_admin",
-    "email": "admin@campusone.local",
-    "firstName": "Campus",
-    "lastName": "Admin",
-    "enabled": true,
-    "emailVerified": true,
-    "credentials": [{"type": "password", "value": "Admin@123", "temporary": false}]
-  }')
+  -d "{
+    \"username\": \"${APP_ADMIN_USER}\",
+    \"email\": \"${APP_ADMIN_USER}@campusone.local\",
+    \"firstName\": \"Campus\",
+    \"lastName\": \"Admin\",
+    \"enabled\": true,
+    \"emailVerified\": true,
+    \"credentials\": [{\"type\": \"password\", \"value\": \"${APP_ADMIN_PASS}\", \"temporary\": false}]
+  }")
 
 if echo "$USER_RESP" | grep -qE "^(201|409)$"; then
+  # If user already existed (409), update the password
+  KC_USER_ID=$(curl -s "$KC_URL/admin/realms/$REALM/users?username=${APP_ADMIN_USER}&exact=true" \
+    "${AUTH[@]}" | jq -r '.[0].id')
+  curl -s -o /dev/null -X PUT \
+    "$KC_URL/admin/realms/$REALM/users/$KC_USER_ID/reset-password" \
+    "${AUTH[@]}" -d "{\"type\":\"password\",\"value\":\"${APP_ADMIN_PASS}\",\"temporary\":false}"
   # Assign campus-staff role
   ROLE_REP=$(curl -s "$KC_URL/admin/realms/$REALM/roles/campus-staff" "${AUTH[@]}")
-  KC_USER_ID=$(curl -s "$KC_URL/admin/realms/$REALM/users?username=campus_admin&exact=true" \
-    "${AUTH[@]}" | jq -r '.[0].id')
   curl -s -o /dev/null -X POST \
     "$KC_URL/admin/realms/$REALM/users/$KC_USER_ID/role-mappings/realm" \
     "${AUTH[@]}" -d "[$ROLE_REP]"
-  log "  Test admin user created: campus_admin / Admin@123"
+  log "  Admin user ready: ${APP_ADMIN_USER} / ${APP_ADMIN_PASS}"
 else
-  warn "  Could not create test user (HTTP $USER_RESP)."
+  warn "  Could not create admin user (HTTP $USER_RESP)."
 fi
 
 # ---------------------------------------------------------------------------
