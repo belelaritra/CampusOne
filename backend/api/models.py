@@ -27,7 +27,10 @@ class User(AbstractUser):
     points       = models.PositiveIntegerField(default=0)
     is_security  = models.BooleanField(default=False)
     # Keycloak subject UUID — set on first SSO login, used for fast user lookup
-    keycloak_id  = models.CharField(max_length=36, blank=True, db_index=True)
+    keycloak_id       = models.CharField(max_length=36, blank=True, db_index=True)
+    # Telegram integration
+    telegram_chat_id  = models.CharField(max_length=20, blank=True, db_index=True)
+    telegram_phone    = models.CharField(max_length=20, blank=True)
     # Academic profile
     degree        = models.CharField(max_length=10, choices=DEGREE_CHOICES, blank=True)
     course        = models.CharField(max_length=100, blank=True)   # e.g. 'Computer Science'

@@ -208,6 +208,112 @@ docker compose down -v
 
 ---
 
+## API Endpoints
+
+All endpoints are prefixed with `/api/`. All require a valid Keycloak Bearer token unless noted.
+
+### Auth
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/auth/me/` | Get current user profile |
+| PATCH | `/api/auth/me/` | Update profile (photo, etc.) |
+
+### Food Ordering — User
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/food/outlets/` | List all food outlets |
+| GET | `/api/food/outlets/<id>/menu/` | Menu for a specific outlet |
+| POST | `/api/food/orders/` | Place an order |
+| GET | `/api/food/orders/pending/` | My pending orders |
+| GET | `/api/food/orders/history/` | My order history |
+| GET | `/api/food/orders/<id>/` | Track a specific order |
+| POST | `/api/food/orders/<id>/cancel/` | Cancel an order |
+| POST | `/api/food/orders/<id>/review/` | Submit a review |
+
+### Food Ordering — Outlet Admin
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST | `/api/food/admin/menu/` | List / create menu items |
+| GET/PUT/DELETE | `/api/food/admin/menu/<id>/` | Manage a menu item |
+| GET | `/api/food/admin/orders/` | All orders for admin's outlet |
+| POST | `/api/food/admin/orders/<id>/<action>/` | Accept / reject / ready / complete |
+| PATCH | `/api/food/admin/orders/<id>/status/` | Update order status |
+
+### Food Analytics (staff only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/food/analytics/hostel-wise/` | Orders by hostel |
+| GET | `/api/food/analytics/top-food-items/` | Most ordered items |
+| GET | `/api/food/analytics/time-wise/` | Orders by time of day |
+| GET | `/api/food/analytics/daily-sales/` | Daily sales chart |
+
+### Lost & Found
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST | `/api/lf/items/` | List / report items |
+| GET/PUT/DELETE | `/api/lf/items/<id>/` | Manage a specific item |
+| GET | `/api/lf/notifications/` | My LF notifications |
+| POST | `/api/lf/notifications/<id>/read/` | Mark notification read |
+| POST | `/api/lf/notifications/mark_all_read/` | Mark all read |
+| GET | `/api/lf/my-claims/` | My claims |
+| GET | `/api/lf/categories/` | LF categories |
+| GET | `/api/lf/analytics/` | LF stats |
+| GET | `/api/lf/analytics/top-lost-locations/` | Top locations |
+| GET | `/api/lf/analytics/top-lost-categories/` | Top categories |
+
+### Mess
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/mess/settings/` | Mess settings |
+| GET | `/api/mess/menu/` | Daily menu |
+| GET | `/api/mess/sma/` | SMA info |
+| GET | `/api/mess/analytics/` | Mess analytics |
+| GET/POST | `/api/mess/coupons/` | Guest coupons |
+| GET/PUT/DELETE | `/api/mess/coupons/<id>/` | Manage a coupon |
+| GET/POST | `/api/mess/rebates/` | Rebate requests |
+| GET/PUT/DELETE | `/api/mess/rebates/<id>/` | Manage a rebate |
+
+### Help & Delivery
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST | `/api/help/` | List / submit help requests |
+| GET/PUT/DELETE | `/api/help/<id>/` | Manage a help request |
+
+### Contacts
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/contacts/faculty/` | Faculty list |
+| GET | `/api/contacts/departments/` | Departments |
+| GET | `/api/contacts/emergency/` | Emergency contacts |
+
+### Doctors
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/doctors/schedule/` | Doctor schedule |
+| GET | `/api/doctors/` | Doctor list |
+
+### Admin Master Console (staff only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/console/stats/` | Platform-wide stats |
+| GET/POST/PUT/DELETE | `/api/console/users/` | Manage all users |
+| GET/POST/PUT/DELETE | `/api/console/menus/` | Manage all menus |
+| GET/POST/PUT/DELETE | `/api/console/coupons/` | Manage all coupons |
+| GET/POST/PUT/DELETE | `/api/console/rebates/` | Manage all rebates |
+| GET/POST/PUT/DELETE | `/api/console/settings/` | Platform settings |
+
+### Legacy Campus
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/hostels/` | Hostel list |
+| GET | `/api/outlets/` | Outlet list |
+| GET | `/api/orders/` | Orders (legacy) |
+| GET | `/api/lostfound/` | Lost & Found (legacy) |
+| GET | `/api/marketplace/` | Marketplace |
+| GET | `/api/events/` | Events |
+
+---
+
 ## Quick Troubleshoot
 
 | Problem | Fix |

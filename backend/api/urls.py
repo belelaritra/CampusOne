@@ -78,6 +78,9 @@ urlpatterns = [
     # --- Auth (Keycloak owns login/logout/register/password-reset) ---
     path('auth/me/',              views.UserProfileView.as_view(),    name='auth-me'),
 
+    # --- Telegram Bot ---
+    path('bot/link-phone/',       views.BotLinkPhoneView.as_view(),   name='bot-link-phone'),
+
     # --- Help & Delivery ---
     path('help/', include(help_router.urls)),
 

@@ -7,6 +7,10 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+from dotenv import load_dotenv
+load_dotenv(BASE_DIR / '.env')
+
+
 
 # Quick-start development settings - unsuitable for production
 SECRET_KEY = 'django-insecure-m9+jdt#r98gke68u=ugvzbd^k5+fsa!pp@(nu!mx$6rvg5qjkh'
@@ -116,12 +120,19 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.bot_authentication.BotAuthentication',
         'api.keycloak_authentication.KeycloakAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+# ---------------------------------------------------------------------------
+# Telegram Bot — shared secret for internal bot↔Django communication
+# ---------------------------------------------------------------------------
+import os
+TELEGRAM_BOT_SECRET = os.environ.get('TELEGRAM_BOT_SECRET', 'change-me-in-production')
 
 # ---------------------------------------------------------------------------
 # Keycloak — identity provider for authentication & authorization

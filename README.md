@@ -300,3 +300,4 @@ frontend/src/pages/ForgotPassword.jsx	Redirects to Keycloak reset flow
 frontend/src/pages/Profile.jsx	Password section → Keycloak account link
 docker-compose.yml	NEW — Keycloak + PostgreSQL
 keycloak/setup-realm.sh	NEW — realm/client/roles setup script
+
