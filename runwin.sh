@@ -168,20 +168,20 @@ free_port() {
 # STEP 1 — App account credentials (Keycloak campusone realm login)
 # ─────────────────────────────────────────────────────────────────────────────
 # NOTE: Keycloak enforces length(8) — password must be ≥8 characters.
-# Django admin (/admin) is always:  admin / admin  (no prompt needed)
+# Django admin (/admin) and Keycloak app login share the same credentials.
 # ─────────────────────────────────────────────────────────────────────────────
 step "App Account Setup"
 echo -e "${DIM}  This account is used to log in to the CampusOne app (Keycloak campusone realm)${RESET}"
-echo -e "${DIM}  Password must be ≥8 characters. Enter username and password space-separated.${RESET}"
+echo -e "${DIM}  It is also the Django /admin superuser. Password must be ≥8 characters.${RESET}"
 echo ""
-read -rp "  Username Password [campusone campusone12345]: " APP_USER APP_PASS
-APP_USER="${APP_USER:-campusone}"
-APP_PASS="${APP_PASS:-campusone12345}"
+read -rp "  Username Password [admin admin12345]: " APP_USER APP_PASS
+APP_USER="${APP_USER:-admin}"
+APP_PASS="${APP_PASS:-admin12345}"
 ok "App credentials set → ${APP_USER} / ${APP_PASS}"
 
-# Django admin is always admin/admin — hardcoded, separate from app login
-DJANGO_ADMIN_USER="admin"
-DJANGO_ADMIN_PASS="admin"
+# Django superuser uses the same credentials as the app login
+DJANGO_ADMIN_USER="$APP_USER"
+DJANGO_ADMIN_PASS="$APP_PASS"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2 — Bot mode selection
@@ -257,8 +257,8 @@ fi
 cat > "$BACKEND_ENV" << EOF
 TELEGRAM_BOT_SECRET=${BOT_SECRET}
 DB_NAME=campusone
-DB_USER=campusone
-DB_PASSWORD=campusone_secret
+DB_USER=admin
+DB_PASSWORD=admin
 DB_HOST=localhost
 DB_PORT=5433
 EOF
@@ -311,7 +311,7 @@ info "Waiting for app-db (PostgreSQL) to be ready..."
 MAX_WAIT_DB=60
 WAITED_DB=0
 printf "  ${DIM}"
-until docker exec campusone-app-db pg_isready -U campusone > /dev/null 2>&1; do
+until docker exec campusone-app-db pg_isready -U admin > /dev/null 2>&1; do
   if [[ $WAITED_DB -ge $MAX_WAIT_DB ]]; then
     echo -e "${RESET}"
     die "App DB did not start within ${MAX_WAIT_DB}s. Check: docker compose logs app-db"
@@ -542,9 +542,9 @@ echo -e "  ║  ${RESET}${DIM}  Log file${GREEN}${BOLD}            →  .campuso
 echo "  ║                                                                  ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo -e "  ║  ${RESET}${YELLOW}  Keycloak Master Admin${GREEN}${BOLD} admin / admin                      ║"
-echo -e "  ║  ${RESET}${YELLOW}  Django Admin (/admin)${GREEN}${BOLD} ${DJANGO_ADMIN_USER} / ${DJANGO_ADMIN_PASS}                      ║"
-echo -e "  ║  ${RESET}${YELLOW}  App Login (Keycloak)${GREEN}${BOLD}  ${APP_USER} / ${APP_PASS}              ║"
-echo -e "  ║  ${RESET}${YELLOW}  App DB (PostgreSQL)${GREEN}${BOLD}   campusone / campusone_secret :5433  ║"
+echo -e "  ║  ${RESET}${YELLOW}  Django Admin (/admin)${GREEN}${BOLD} ${DJANGO_ADMIN_USER} / ${DJANGO_ADMIN_PASS}                   ║"
+echo -e "  ║  ${RESET}${YELLOW}  App Login (Keycloak)${GREEN}${BOLD}  ${APP_USER} / ${APP_PASS}                   ║"
+echo -e "  ║  ${RESET}${YELLOW}  App DB (PostgreSQL)${GREEN}${BOLD}   admin / admin  (db: campusone :5433) ║"
 echo "  ║                                                                  ║"
 echo -e "  ║  ${RESET}${DIM}  Press Ctrl+C to stop all services${GREEN}${BOLD}                       ║"
 echo "  ╚══════════════════════════════════════════════════════════════════╝"

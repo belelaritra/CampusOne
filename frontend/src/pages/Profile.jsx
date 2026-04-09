@@ -216,12 +216,12 @@ export default function Profile() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div className="form-group" style={{ gridColumn: '1/-1' }}>
                 <label>Full Name <span style={{ color: '#dc2626' }}>*</span></label>
-                <input name="full_name" className="search-input" placeholder="e.g. Ravi Kumar"
+                <input name="full_name" className="search-input" placeholder="e.g. Aritra Belel"
                   value={prof.full_name} onChange={handleProf} required />
               </div>
               <div className="form-group">
                 <label>Email</label>
-                <input name="email" type="email" className="search-input" placeholder="you@iitb.ac.in"
+                <input name="email" type="email" className="search-input" placeholder="username@iitb.ac.in"
                   value={prof.email} onChange={handleProf} />
               </div>
               <div className="form-group">
@@ -231,7 +231,7 @@ export default function Profile() {
               </div>
               <div className="form-group">
                 <label>Roll Number <span style={{ color: '#dc2626' }}>*</span></label>
-                <input name="roll_number" className="search-input" placeholder="e.g. 21B030001"
+                <input name="roll_number" className="search-input" placeholder="e.g. 24M0000"
                   value={prof.roll_number} onChange={handleProf} required />
               </div>
               <div className="form-group">
@@ -264,7 +264,7 @@ export default function Profile() {
               </div>
               <div className="form-group">
                 <label>Room Number</label>
-                <input name="room_number" className="search-input" placeholder="e.g. 101"
+                <input name="room_number" className="search-input" placeholder="e.g. C500"
                   value={prof.room_number} onChange={handleProf} />
               </div>
             </div>

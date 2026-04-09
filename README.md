@@ -125,10 +125,9 @@ Once running:
 
 | | Username | Password |
 |---|---|---|
-| Keycloak Admin | `admin` | `admin` |
-| Test Staff User | `campus_admin` | `Admin@123` |
-| Django Admin | `admin` (or chosen at first run) | `admin` (or chosen at first run) |
-| App DB (PostgreSQL) | `campusone` | `campusone_secret` (port `5433`) |
+| Keycloak Master Admin | `admin` | `admin` |
+| App Login + Django Admin | `admin` (or chosen at first run) | `admin12345` (or chosen at first run) |
+| App DB (PostgreSQL) | `admin` | `admin` (db: `campusone`, port `5433`) |
 
 ---
 
