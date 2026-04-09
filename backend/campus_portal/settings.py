@@ -13,8 +13,12 @@ load_dotenv(BASE_DIR / '.env')
 
 
 
-# Quick-start development settings - unsuitable for production
-SECRET_KEY = 'django-insecure-m9+jdt#r98gke68u=ugvzbd^k5+fsa!pp@(nu!mx$6rvg5qjkh'
+# Secret key — MUST be set via DJANGO_SECRET_KEY env var in production.
+# run.sh / runwin.sh generate and persist this automatically in backend/.env.
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-fallback-dev-only-do-not-use-in-production',
+)
 
 DEBUG = True
 

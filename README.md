@@ -214,16 +214,23 @@ The startup script writes these automatically. Never commit them — they are in
 
 | File | Purpose |
 |---|---|
-| `backend/.env` | `TELEGRAM_BOT_SECRET`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` |
+| `backend/.env` | `DJANGO_SECRET_KEY`, `TELEGRAM_BOT_SECRET`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` |
 | `bot/.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_SECRET`, `DJANGO_API_URL` |
 | `frontend/.env.local` | Keycloak URL, realm, client ID, API URL |
 
-To set up manually (without `run.sh`), copy the `.env.example` files:
+`run.sh` / `runwin.sh` generate and persist `DJANGO_SECRET_KEY` and `TELEGRAM_BOT_SECRET` automatically on first run, and reuse them on subsequent runs.
+
+To set up manually (without `run.sh`), copy the `.env.example` files and generate the required secrets:
 
 ```bash
 cp backend/.env.example backend/.env
 cp bot/.env.example bot/.env
-# edit each file and fill in your values
+
+# Generate DJANGO_SECRET_KEY (paste result into backend/.env)
+python3 -c "import secrets, string; chars = string.ascii_letters + string.digits + '!@#\$%^&*(-_=+)'; print(''.join(secrets.choice(chars) for _ in range(50)))"
+
+# Generate TELEGRAM_BOT_SECRET (paste result into backend/.env and bot/.env)
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ---

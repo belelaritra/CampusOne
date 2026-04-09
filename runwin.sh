@@ -238,11 +238,13 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 step "Writing Environment Files"
 
-# Generate shared secret if not already set
+# Generate shared secrets if not already set
 BACKEND_ENV="$SCRIPT_DIR/backend/.env"
 EXISTING_SECRET=""
+EXISTING_DJANGO_KEY=""
 if [[ -f "$BACKEND_ENV" ]]; then
   EXISTING_SECRET=$(grep '^TELEGRAM_BOT_SECRET=' "$BACKEND_ENV" 2>/dev/null | cut -d'=' -f2- || true)
+  EXISTING_DJANGO_KEY=$(grep '^DJANGO_SECRET_KEY=' "$BACKEND_ENV" 2>/dev/null | cut -d'=' -f2- || true)
 fi
 
 if [[ -z "$EXISTING_SECRET" ]]; then
@@ -253,8 +255,17 @@ else
   info "Using existing TELEGRAM_BOT_SECRET from backend/.env"
 fi
 
+if [[ -z "$EXISTING_DJANGO_KEY" ]]; then
+  DJANGO_SECRET_KEY=$(python3 -c "import secrets, string; chars = string.ascii_letters + string.digits + '!@#\$%^&*(-_=+)'; print(''.join(secrets.choice(chars) for _ in range(50)))")
+  info "Generated new DJANGO_SECRET_KEY"
+else
+  DJANGO_SECRET_KEY="$EXISTING_DJANGO_KEY"
+  info "Using existing DJANGO_SECRET_KEY from backend/.env"
+fi
+
 # Write backend/.env
 cat > "$BACKEND_ENV" << EOF
+DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
 TELEGRAM_BOT_SECRET=${BOT_SECRET}
 DB_NAME=campusone
 DB_USER=admin
