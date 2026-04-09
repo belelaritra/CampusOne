@@ -256,6 +256,11 @@ fi
 # Write backend/.env
 cat > "$BACKEND_ENV" << EOF
 TELEGRAM_BOT_SECRET=${BOT_SECRET}
+DB_NAME=campusone
+DB_USER=campusone
+DB_PASSWORD=campusone_secret
+DB_HOST=localhost
+DB_PORT=5433
 EOF
 ok "backend/.env written"
 
@@ -286,20 +291,37 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — Docker / Keycloak
 # ─────────────────────────────────────────────────────────────────────────────
-step "Starting Docker Services (Keycloak + PostgreSQL)"
+step "Starting Docker Services (Keycloak + App DB PostgreSQL)"
 
 cd "$SCRIPT_DIR"
 
 if [[ "$RESET_KEYCLOAK" == "true" ]]; then
-  warn "Reset flag set — wiping Keycloak database..."
+  warn "Reset flag set — wiping all Docker volumes (Keycloak DB + App DB)..."
   docker compose down -v 2>/dev/null || true
-  ok "Keycloak DB wiped"
+  ok "All DB volumes wiped"
 fi
 
 # Start containers
 info "Starting containers..."
 docker compose up -d >> "$LOG_FILE" 2>&1 || die "Docker Compose failed. Check: $LOG_FILE"
 ok "Containers started"
+
+# Wait for app-db to be ready
+info "Waiting for app-db (PostgreSQL) to be ready..."
+MAX_WAIT_DB=60
+WAITED_DB=0
+printf "  ${DIM}"
+until docker exec campusone-app-db pg_isready -U campusone > /dev/null 2>&1; do
+  if [[ $WAITED_DB -ge $MAX_WAIT_DB ]]; then
+    echo -e "${RESET}"
+    die "App DB did not start within ${MAX_WAIT_DB}s. Check: docker compose logs app-db"
+  fi
+  printf "·"
+  sleep 2
+  WAITED_DB=$((WAITED_DB + 2))
+done
+echo -e "${RESET}"
+ok "App DB ready (took ${WAITED_DB}s)"
 
 # Wait for Keycloak to be ready
 info "Waiting for Keycloak to be ready..."
@@ -522,6 +544,7 @@ echo "  ╠═══════════════════════
 echo -e "  ║  ${RESET}${YELLOW}  Keycloak Master Admin${GREEN}${BOLD} admin / admin                      ║"
 echo -e "  ║  ${RESET}${YELLOW}  Django Admin (/admin)${GREEN}${BOLD} ${DJANGO_ADMIN_USER} / ${DJANGO_ADMIN_PASS}                      ║"
 echo -e "  ║  ${RESET}${YELLOW}  App Login (Keycloak)${GREEN}${BOLD}  ${APP_USER} / ${APP_PASS}              ║"
+echo -e "  ║  ${RESET}${YELLOW}  App DB (PostgreSQL)${GREEN}${BOLD}   campusone / campusone_secret :5433  ║"
 echo "  ║                                                                  ║"
 echo -e "  ║  ${RESET}${DIM}  Press Ctrl+C to stop all services${GREEN}${BOLD}                       ║"
 echo "  ╚══════════════════════════════════════════════════════════════════╝"

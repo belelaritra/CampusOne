@@ -1,12 +1,31 @@
-# CampusOne — Keycloak stack
-# Runs Keycloak + its PostgreSQL DB.
+# CampusOne — Docker services
+# Runs Keycloak + its PostgreSQL DB + the app's PostgreSQL DB.
 # Django and React run locally as before (python manage.py runserver / npm run dev).
 #
 # Start:  docker compose up -d
 # Stop:   docker compose down
-# Wipe:   docker compose down -v   (deletes Keycloak DB data)
+# Wipe:   docker compose down -v   (deletes ALL DB data — Keycloak + App)
 
 services:
+
+  # ── App database (Django) ─────────────────────────────────────────────────
+  app-db:
+    image: postgres:16-alpine
+    container_name: campusone-app-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       campusone
+      POSTGRES_USER:     campusone
+      POSTGRES_PASSWORD: campusone_secret
+    ports:
+      - "5433:5432"
+    volumes:
+      - app_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campusone"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── Keycloak database ────────────────────────────────────────────────────
   keycloak-db:
@@ -56,4 +75,5 @@ services:
         condition: service_healthy
 
 volumes:
+  app_db_data:
   keycloak_db_data:

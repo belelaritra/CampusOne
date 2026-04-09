@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CampusOne — System Design</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #6c63ff;
+      --accent2: #00d4aa;
+      --accent3: #ff6b6b;
+      --accent4: #ffd166;
+      --text: #e2e8f0;
+      --text-muted: #8892b0;
+      --text-dim: #4a5568;
+      --green: #48bb78;
+      --blue: #4299e1;
+      --orange: #ed8936;
+      --pink: #ed64a6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(15,17,23,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      display: flex; align-items: center; gap: 2rem;
+      height: 56px;
+    }
+    nav .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: 1px; }
+    nav a { color: var(--text-muted); text-decoration: none; font-size: 0.85rem; transition: color 0.2s; }
+    nav a:hover { color: var(--accent2); }
+
+    /* ── LAYOUT ── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 3rem 2rem; }
+    .section { margin-bottom: 5rem; }
+    h1 { font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.6rem; font-weight: 700; color: var(--text); border-left: 4px solid var(--accent); padding-left: 1rem; margin-bottom: 1.5rem; }
+    h3 { font-size: 1.15rem; font-weight: 600; color: var(--accent2); margin-bottom: 0.75rem; }
+    h4 { font-size: 0.95rem; font-weight: 600; color: var(--accent4); margin-bottom: 0.5rem; }
+    p { color: var(--text-muted); margin-bottom: 1rem; }
+    .subtitle { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 3rem; }
+    .tag { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; color: var(--accent2); margin: 2px; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .badge-green { background: rgba(72,187,120,0.15); color: var(--green); border: 1px solid rgba(72,187,120,0.3); }
+    .badge-blue  { background: rgba(66,153,225,0.15); color: var(--blue);  border: 1px solid rgba(66,153,225,0.3); }
+    .badge-red   { background: rgba(237,100,106,0.15); color: var(--accent3); border: 1px solid rgba(237,100,106,0.3); }
+    .badge-orange{ background: rgba(237,137,54,0.15);  color: var(--orange); border: 1px solid rgba(237,137,54,0.3); }
+    .badge-purple{ background: rgba(108,99,255,0.15); color: var(--accent); border: 1px solid rgba(108,99,255,0.3); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+    .rationale { background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.25); border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1rem; }
+    .rationale p { color: var(--text); margin: 0; font-size: 0.9rem; }
+    .rationale::before { content: '💡 Why'; display: block; font-size: 0.75rem; font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; letter-spacing: 1px; }
+    code { font-family: 'Cascadia Code', 'Fira Code', monospace; background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 0.85em; color: var(--accent2); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    thead th { background: var(--surface2); color: var(--text); padding: 0.6rem 1rem; text-align: left; border-bottom: 2px solid var(--border); }
+    tbody td { padding: 0.55rem 1rem; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    tbody tr:hover td { background: rgba(255,255,255,0.02); }
+    .method { display: inline-block; width: 56px; text-align: center; padding: 2px 0; border-radius: 4px; font-size: 0.7rem; font-weight: 700; }
+    .GET    { background: rgba(72,187,120,0.15);  color: var(--green); }
+    .POST   { background: rgba(66,153,225,0.15);  color: var(--blue); }
+    .PATCH  { background: rgba(237,137,54,0.15);  color: var(--orange); }
+    .DELETE { background: rgba(237,100,106,0.15); color: var(--accent3); }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+
+    /* ── ARCHITECTURE DIAGRAM ── */
+    .arch-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      overflow-x: auto;
+    }
+    .arch-row { display: flex; align-items: center; justify-content: center; gap: 0; margin: 0.5rem 0; flex-wrap: nowrap; }
+    .arch-box {
+      border-radius: 10px;
+      padding: 0.7rem 1.1rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-align: center;
+      min-width: 110px;
+      white-space: nowrap;
+    }
+    .arch-box.client   { background: rgba(66,153,225,0.15);  border: 1px solid rgba(66,153,225,0.4);  color: var(--blue); }
+    .arch-box.bot      { background: rgba(237,137,54,0.15);  border: 1px solid rgba(237,137,54,0.4);  color: var(--orange); }
+    .arch-box.keycloak { background: rgba(108,99,255,0.15);  border: 1px solid rgba(108,99,255,0.4);  color: var(--accent); }
+    .arch-box.django   { background: rgba(0,212,170,0.12);   border: 1px solid rgba(0,212,170,0.35);  color: var(--accent2); }
+    .arch-box.db       { background: rgba(237,100,106,0.12); border: 1px solid rgba(237,100,106,0.35);color: var(--accent3); }
+    .arch-box.media    { background: rgba(255,209,102,0.1);  border: 1px solid rgba(255,209,102,0.3); color: var(--accent4); }
+    .arch-box.layer    { background: rgba(72,187,120,0.1);   border: 1px solid rgba(72,187,120,0.3);  color: var(--green); }
+    .arch-arrow { color: var(--text-dim); font-size: 1.2rem; padding: 0 0.4rem; align-self: center; }
+    .arch-label { font-size: 0.68rem; color: var(--text-dim); text-align: center; margin-top: 2px; }
+    .arch-group {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      position: relative;
+      text-align: center;
+    }
+    .arch-group-label {
+      position: absolute;
+      top: -10px; left: 12px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      background: var(--surface);
+      padding: 0 6px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .arch-section-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-right: 0.5rem;
+      white-space: nowrap;
+    }
+    .spacer { width: 1rem; }
+
+    /* ── FLOW ARROWS ── */
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .flow-num {
+      min-width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700; color: white;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .flow-text { color: var(--text-muted); font-size: 0.875rem; }
+    .flow-text strong { color: var(--text); }
+
+    /* ── ER DIAGRAM ── */
+    .er-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; }
+    .er-entity {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      min-width: 170px;
+      margin: 0.5rem;
+      vertical-align: top;
+    }
+    .er-entity-head {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    .er-entity-body { padding: 0.25rem 0; }
+    .er-field {
+      padding: 0.2rem 0.75rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: monospace;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      display: flex; justify-content: space-between; gap: 0.5rem;
+    }
+    .er-field.pk { color: var(--accent4); }
+    .er-field.fk { color: var(--accent); }
+    .er-field.uk { color: var(--accent2); }
+    .er-type { color: var(--text-dim); font-size: 0.65rem; }
+
+    .er-group { margin-bottom: 2rem; }
+    .er-group-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 3px solid var(--border); }
+    .er-entities { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+    /* STATE MACHINE */
+    .state-machine { display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin: 1rem 0; }
+    .state-box {
+      border-radius: 8px;
+      padding: 0.4rem 0.9rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      border: 2px solid;
+    }
+    .state-pending  { border-color: var(--accent4); color: var(--accent4); background: rgba(255,209,102,0.08); }
+    .state-accepted { border-color: var(--blue);    color: var(--blue);    background: rgba(66,153,225,0.08); }
+    .state-done     { border-color: var(--green);   color: var(--green);   background: rgba(72,187,120,0.08); }
+    .state-expired  { border-color: var(--text-dim);color: var(--text-dim);background: rgba(74,85,104,0.08); }
+    .state-cancelled{ border-color: var(--accent3); color: var(--accent3); background: rgba(237,100,106,0.08); }
+    .state-preparing{ border-color: var(--orange);  color: var(--orange);  background: rgba(237,137,54,0.08); }
+    .state-available{ border-color: var(--accent2); color: var(--accent2); background: rgba(0,212,170,0.08); }
+    .state-resolved { border-color: var(--green);   color: var(--green);   background: rgba(72,187,120,0.08); }
+    .state-arrow { color: var(--text-dim); padding: 0 0.5rem; font-size: 1rem; display: flex; flex-direction: column; align-items: center; }
+    .state-arrow span { font-size: 0.6rem; color: var(--text-dim); white-space: nowrap; margin-bottom: 1px; }
+
+    /* TRADE-OFFS */
+    .tradeoff-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .tradeoff-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
+    .tradeoff-versus { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.75rem; align-items: stretch; }
+    .vs-col { background: var(--surface2); border-radius: 8px; padding: 0.75rem; font-size: 0.82rem; }
+    .vs-col.chosen { border: 1px solid rgba(0,212,170,0.4); }
+    .vs-col.not-chosen { border: 1px solid var(--border); opacity: 0.7; }
+    .vs-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.4rem; }
+    .vs-label.chosen-label { color: var(--accent2); }
+    .vs-label.alt-label { color: var(--text-dim); }
+    .vs-divider { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 0.8rem; font-weight: 700; }
+    .vs-col ul { padding-left: 1rem; color: var(--text-muted); }
+    .vs-col li { margin-bottom: 0.25rem; }
+
+    /* ── COMPONENT DIAGRAM ── */
+    .comp-layer {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.5rem 1.25rem;
+      margin-bottom: 1.25rem;
+      position: relative;
+    }
+    .comp-layer-label {
+      position: absolute; top: -10px; left: 14px;
+      font-size: 0.68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      background: var(--surface);
+      padding: 0 8px;
+      color: var(--text-muted);
+    }
+    .comp-modules { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .comp-module {
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-align: center;
+    }
+    .mod-auth   { background: rgba(108,99,255,0.12); border: 1px solid rgba(108,99,255,0.35); color: var(--accent); }
+    .mod-help   { background: rgba(255,209,102,0.1);  border: 1px solid rgba(255,209,102,0.3); color: var(--accent4); }
+    .mod-food   { background: rgba(66,153,225,0.12);  border: 1px solid rgba(66,153,225,0.35); color: var(--blue); }
+    .mod-mess   { background: rgba(0,212,170,0.1);    border: 1px solid rgba(0,212,170,0.3);   color: var(--accent2); }
+    .mod-lf     { background: rgba(237,100,106,0.1);  border: 1px solid rgba(237,100,106,0.3); color: var(--accent3); }
+    .mod-bot    { background: rgba(237,137,54,0.1);   border: 1px solid rgba(237,137,54,0.3);  color: var(--orange); }
+    .mod-console{ background: rgba(72,187,120,0.1);   border: 1px solid rgba(72,187,120,0.3);  color: var(--green); }
+    .mod-contact{ background: rgba(237,64,182,0.1);   border: 1px solid rgba(237,64,182,0.3);  color: var(--pink); }
+
+    @media (max-width: 768px) {
+      .grid2, .grid3 { grid-template-columns: 1fr; }
+      .arch-row { flex-wrap: wrap; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">CampusOne</span>
+  <a href="#architecture">Architecture</a>
+  <a href="#components">Components</a>
+  <a href="#datamodel">Data Model</a>
+  <a href="#apis">APIs</a>
+  <a href="#tradeoffs">Trade-offs</a>
+</nav>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="section" style="padding-top:1rem;">
+    <h1>System Design</h1>
+    <p class="subtitle">CampusOne — Campus Super-App for IITB students. Full-stack: React 19 · Django REST · Keycloak · Telegram Bot · PostgreSQL.</p>
+    <div>
+      <span class="tag">React 19</span>
+      <span class="tag">Vite 8</span>
+      <span class="tag">Django 5</span>
+      <span class="tag">DRF</span>
+      <span class="tag">Keycloak 25</span>
+      <span class="tag">PostgreSQL</span>
+      <span class="tag">Docker</span>
+      <span class="tag">PyJWT</span>
+      <span class="tag">Telegram Bot</span>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- 1. HIGH-LEVEL ARCHITECTURE -->
+  <div class="section" id="architecture">
+    <h2>1. High-Level Architecture</h2>
+    <p>CampusOne follows a classic three-tier architecture — a stateless React SPA, a Django REST API, and persistent storage — extended with a Keycloak identity layer and a Telegram bot sidecar.</p>
+
+    <div class="arch-diagram">
+
+      <!-- Row 1: Clients -->
+      <div style="text-align:center; margin-bottom: 1.5rem;">
+        <div class="arch-section-label" style="display:block; margin-bottom:0.75rem;">Clients</div>
+        <div class="arch-row">
+          <div>
+            <div class="arch-box client">🌐 React SPA<br/><span style="font-size:0.68rem;opacity:0.7">Vite 8 · React 19</span></div>
+            <div class="arch-label">Browser</div>
+          </div>
+          <div class="spacer"></div>
+          <div class="spacer"></div>
+          <div>
+            <div class="arch-box bot">🤖 Telegram Bot<br/><span style="font-size:0.68rem;opacity:0.7">python-telegram-bot</span></div>
+            <div class="arch-label">External Service</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow down -->
+      <div style="text-align:center; color:var(--text-dim); margin: 0.5rem 0; font-size: 1.4rem;">↓</div>
+
+      <!-- Row 2: Auth + API Gateway -->
+      <div style="text-align:center; margin-bottom: 1.5rem;">
+        <div class="arch-section-label" style="display:block; margin-bottom:0.75rem;">Identity &amp; API Layer</div>
+        <div class="arch-row" style="justify-content:center; gap: 1.5rem;">
+          <div>
+            <div class="arch-box keycloak">🔐 Keycloak 25<br/><span style="font-size:0.68rem;opacity:0.7">OpenID Connect · JWKS</span></div>
+            <div class="arch-label">SSO / JWT Issuer</div>
+          </div>
+          <div style="display:flex;align-items:center;">
+            <div style="height:1px;width:40px;background:var(--border)"></div>
+            <span style="color:var(--text-dim);font-size:0.7rem;padding:0 6px">RS256<br/>Bearer</span>
+            <div style="height:1px;width:40px;background:var(--border)"></div>
+          </div>
+          <div>
+            <div class="arch-box django">⚙️ Django REST API<br/><span style="font-size:0.68rem;opacity:0.7">DRF · KeycloakAuth · BotAuth</span></div>
+            <div class="arch-label">:8000</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow down -->
+      <div style="text-align:center; color:var(--text-dim); margin: 0.5rem 0; font-size: 1.4rem;">↓</div>
+
+      <!-- Row 3: Storage -->
+      <div style="text-align:center;">
+        <div class="arch-section-label" style="display:block; margin-bottom:0.75rem;">Storage</div>
+        <div class="arch-row" style="justify-content:center; gap: 1.5rem;">
+          <div>
+            <div class="arch-box db">🐘 Django SQLite / PostgreSQL<br/><span style="font-size:0.68rem;opacity:0.7">App data · all models</span></div>
+            <div class="arch-label">Primary DB</div>
+          </div>
+          <div class="spacer"></div>
+          <div>
+            <div class="arch-box db" style="border-color:rgba(108,99,255,0.4);color:var(--accent)">🐘 Keycloak PostgreSQL<br/><span style="font-size:0.68rem;opacity:0.7">Users · sessions · realms</span></div>
+            <div class="arch-label">Identity DB (Docker)</div>
+          </div>
+          <div class="spacer"></div>
+          <div>
+            <div class="arch-box media">📁 Media Files<br/><span style="font-size:0.68rem;opacity:0.7">photos · menu images</span></div>
+            <div class="arch-label">Local FS / /media/</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auth flow legend -->
+      <div style="margin-top:2rem; padding: 1rem; background: var(--surface2); border-radius: 10px; font-size:0.8rem;">
+        <div style="font-weight:700; color: var(--text); margin-bottom: 0.5rem;">Auth Flows</div>
+        <div style="display:flex; flex-wrap:wrap; gap:1.5rem;">
+          <div>
+            <span style="color:var(--accent); font-weight:600;">Browser SSO:</span>
+            <span style="color:var(--text-muted)"> React → Keycloak (OIDC login) → RS256 JWT → Django KeycloakAuthentication → User provisioned/synced</span>
+          </div>
+          <div>
+            <span style="color:var(--orange); font-weight:600;">Bot:</span>
+            <span style="color:var(--text-muted)"> Telegram Bot → Django <code>X-Bot-Secret</code> + <code>X-Telegram-Chat-ID</code> → BotAuthentication → User looked up by chat_id</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rationale">
+      <p>
+        <strong>Keycloak as the identity source</strong> — Rather than rolling a custom login/register/password-reset system, Keycloak handles all of that out-of-the-box (OIDC, brute-force protection, password policies, token refresh). Django receives only a signed JWT, validates it against the JWKS endpoint (keys cached 5 min, rotated automatically), and provisions a local User row. This keeps Django stateless and lets Keycloak handle token lifecycle. <br/><br/>
+        <strong>Two-layer role model</strong> — Coarse roles (<code>campus-staff</code>, <code>campus-security</code>) come from Keycloak realm roles and are synced on every request. Fine-grained roles (<code>OutletAdmin</code>, <code>MessAdminProfile</code>) live in the Django DB and are checked per-request with tiny DB hits. This avoids encoding business logic in Keycloak.<br/><br/>
+        <strong>Separate Telegram auth backend</strong> — The bot never gets a Keycloak token; it uses a shared secret + chat_id. This is safe because the bot is a trusted internal service, not a public client.
+      </p>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- 2. COMPONENT DIAGRAM -->
+  <div class="section" id="components">
+    <h2>2. Component Block Diagrams</h2>
+
+    <h3>Frontend Components (React)</h3>
+    <div class="comp-layer">
+      <div class="comp-layer-label">Entry / Shell</div>
+      <div class="comp-modules">
+        <div class="comp-module mod-auth">main.jsx<br/><span style="font-weight:400;font-size:0.7rem">Keycloak-js init</span></div>
+        <div class="comp-module mod-auth">App.jsx<br/><span style="font-weight:400;font-size:0.7rem">Router · ProtectedRoute</span></div>
+        <div class="comp-module mod-auth">AuthContext<br/><span style="font-weight:400;font-size:0.7rem">token · user · logout</span></div>
+        <div class="comp-module mod-auth">AppContext<br/><span style="font-weight:400;font-size:0.7rem">global state</span></div>
+      </div>
+    </div>
+
+    <div class="comp-layer">
+      <div class="comp-layer-label">Pages</div>
+      <div class="comp-modules">
+        <div class="comp-module mod-food">FoodOrdering</div>
+        <div class="comp-module mod-help">HelpDelivery</div>
+        <div class="comp-module mod-mess">Mess</div>
+        <div class="comp-module mod-lf">LostFound</div>
+        <div class="comp-module mod-contact">Contacts</div>
+        <div class="comp-module mod-auth">Hospital</div>
+        <div class="comp-module mod-auth">CampusMap</div>
+        <div class="comp-module mod-auth">Marketplace</div>
+        <div class="comp-module mod-auth">Hostels</div>
+        <div class="comp-module mod-auth">BuggyPass</div>
+        <div class="comp-module mod-auth">Groups</div>
+        <div class="comp-module mod-auth">Profile</div>
+        <div class="comp-module mod-console">AdminConsole</div>
+        <div class="comp-module mod-auth">Dashboard</div>
+      </div>
+    </div>
+
+    <div class="comp-layer">
+      <div class="comp-layer-label">Shared UI</div>
+      <div class="comp-modules">
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">Sidebar</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">MainLayout</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">Modal</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">Tabs</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">CartModal</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">CartContext</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">ui.jsx (atoms)</div>
+      </div>
+    </div>
+
+    <div style="height:1.5rem;"></div>
+
+    <h3>Backend Components (Django)</h3>
+    <div class="comp-layer">
+      <div class="comp-layer-label">Auth Middleware</div>
+      <div class="comp-modules">
+        <div class="comp-module mod-auth">KeycloakAuthentication<br/><span style="font-weight:400;font-size:0.7rem">Bearer JWT · JWKS · user sync</span></div>
+        <div class="comp-module mod-bot">BotAuthentication<br/><span style="font-weight:400;font-size:0.7rem">X-Bot-Secret · chat_id</span></div>
+        <div class="comp-module mod-auth">IsOutletAdmin<br/><span style="font-weight:400;font-size:0.7rem">OutletAdmin FK check</span></div>
+        <div class="comp-module mod-auth">IsMessAdmin<br/><span style="font-weight:400;font-size:0.7rem">MessAdminProfile check</span></div>
+        <div class="comp-module mod-auth">IsStaffUser<br/><span style="font-weight:400;font-size:0.7rem">is_staff flag</span></div>
+      </div>
+    </div>
+
+    <div class="comp-layer">
+      <div class="comp-layer-label">ViewSets &amp; APIViews</div>
+      <div class="comp-modules">
+        <div class="comp-module mod-help">HelpRequestViewSet</div>
+        <div class="comp-module mod-food">FoodOutletListView<br/>FoodOutletMenuView<br/>PlaceOrderView<br/>AdminOrderActionView<br/>SubmitReviewView</div>
+        <div class="comp-module mod-mess">MessSettingsView<br/>DailyMenuView<br/>GuestCouponViewSet<br/>RebateViewSet<br/>MessSMAView</div>
+        <div class="comp-module mod-lf">LFItemViewSet<br/>LFNotificationViewSet<br/>LFCategoryListView<br/>LFAnalyticsView</div>
+        <div class="comp-module mod-bot">BotLinkPhoneView</div>
+        <div class="comp-module mod-console">ConsoleStatsView<br/>Console*ViewSets</div>
+        <div class="comp-module mod-contact">FacultyViewSet<br/>DepartmentViewSet</div>
+      </div>
+    </div>
+
+    <div class="comp-layer">
+      <div class="comp-layer-label">Serializers (Validation + Shape)</div>
+      <div class="comp-modules">
+        <div class="comp-module mod-help">HelpRequest<br/>Create/Edit/Read</div>
+        <div class="comp-module mod-food">PlaceOrder<br/>FoodOrder<br/>ReviewSubmit</div>
+        <div class="comp-module mod-mess">GuestCouponCreate<br/>RebateRequest<br/>MessSettings</div>
+        <div class="comp-module mod-lf">LFItemCreate<br/>LFItem<br/>LFClaim</div>
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">UserProfile<br/>UserProfileUpdate</div>
+      </div>
+    </div>
+
+    <div class="comp-layer">
+      <div class="comp-layer-label">Models (ORM)</div>
+      <div class="comp-modules">
+        <div class="comp-module" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);">User (AbstractUser+)</div>
+        <div class="comp-module mod-help">HelpRequest</div>
+        <div class="comp-module mod-food">Outlet · MenuItem<br/>OutletAdmin<br/>FoodOrder · FoodOrderItem<br/>Review</div>
+        <div class="comp-module mod-mess">MessHostelSettings<br/>MessAdminProfile<br/>DailyMenu<br/>GuestCouponPurchase<br/>RebateRequest</div>
+        <div class="comp-module mod-lf">LFItem · LFClaim<br/>LFCategory<br/>LFNotification · LFLog</div>
+        <div class="comp-module mod-contact">Faculty · Department<br/>EmergencyContact</div>
+      </div>
+    </div>
+
+    <div style="height:1.5rem;"></div>
+
+    <h3>State Machines</h3>
+    <div class="grid2">
+      <div class="card">
+        <h4>Help Request</h4>
+        <div class="state-machine">
+          <div class="state-box state-pending">PENDING</div>
+          <div class="state-arrow"><span>accept</span>→</div>
+          <div class="state-box state-accepted">ACCEPTED</div>
+          <div class="state-arrow"><span>complete</span>→</div>
+          <div class="state-box state-done">COMPLETED</div>
+        </div>
+        <div class="state-machine" style="margin-top:0.5rem;">
+          <div class="state-box state-pending">PENDING</div>
+          <div class="state-arrow"><span>to_time &lt; now</span>→</div>
+          <div class="state-box state-expired">EXPIRED</div>
+        </div>
+      </div>
+      <div class="card">
+        <h4>Food Order (Delivery)</h4>
+        <div class="state-machine" style="flex-direction:column; align-items:flex-start; gap:0.25rem;">
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <div class="state-box state-pending">PENDING</div>
+            <span style="color:var(--text-dim);font-size:0.75rem;">→ admin accept</span>
+            <div class="state-box state-accepted">ACCEPTED</div>
+            <span style="color:var(--text-dim);font-size:0.75rem;">→</span>
+            <div class="state-box state-preparing">PREPARING</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;padding-left:1rem;">
+            <span style="color:var(--text-dim);font-size:0.75rem;">→</span>
+            <div class="state-box state-accepted" style="border-color:var(--orange);color:var(--orange);">OUT_FOR_DELIVERY</div>
+            <span style="color:var(--text-dim);font-size:0.75rem;">→</span>
+            <div class="state-box state-done">DELIVERED</div>
+          </div>
+          <div style="color:var(--text-dim);font-size:0.75rem;padding-top:0.25rem;">Takeaway: PREPARING → READY → TOOK</div>
+          <div style="color:var(--text-dim);font-size:0.75rem;">Any non-terminal → CANCELLED</div>
+        </div>
+      </div>
+      <div class="card">
+        <h4>Rebate Request</h4>
+        <div class="state-machine">
+          <div class="state-box state-pending">PENDING</div>
+          <div class="state-arrow"><span>admin approve</span>→</div>
+          <div class="state-box state-done">APPROVED</div>
+        </div>
+        <div class="state-machine" style="margin-top:0.5rem;">
+          <div class="state-box state-pending">PENDING</div>
+          <div class="state-arrow"><span>admin reject</span>→</div>
+          <div class="state-box state-expired">REJECTED</div>
+        </div>
+      </div>
+      <div class="card">
+        <h4>Lost &amp; Found Item</h4>
+        <div class="state-machine">
+          <div class="state-box state-available">AVAILABLE</div>
+          <div class="state-arrow"><span>interact</span>→</div>
+          <div class="state-box state-pending">PENDING</div>
+          <div class="state-arrow"><span>resolve</span>→</div>
+          <div class="state-box state-resolved">RESOLVED</div>
+        </div>
+        <div class="state-machine" style="margin-top:0.5rem;">
+          <div class="state-box state-available">AVAILABLE</div>
+          <div class="state-arrow"><span style="color:transparent">x</span>←</div>
+          <div class="state-box state-pending">PENDING</div>
+          <span style="color:var(--text-dim);font-size:0.75rem;margin-left:0.5rem;">← revert (reporter/security)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- 3. DATA MODEL -->
+  <div class="section" id="datamodel">
+    <h2>3. Data Model (ER Schema)</h2>
+    <p>Legend: <span style="color:var(--accent4);">PK</span> = Primary Key · <span style="color:var(--accent);">FK</span> = Foreign Key · <span style="color:var(--accent2);">UQ</span> = Unique</p>
+
+    <div class="er-diagram">
+
+      <!-- Core User -->
+      <div class="er-group">
+        <div class="er-group-title">Core</div>
+        <div class="er-entities">
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(108,99,255,0.2);color:var(--accent);">User</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK · int</span></div>
+              <div class="er-field uk">username <span class="er-type">UQ · str</span></div>
+              <div class="er-field uk">email <span class="er-type">UQ · str</span></div>
+              <div class="er-field uk">keycloak_id <span class="er-type">UQ · str</span></div>
+              <div class="er-field uk">telegram_chat_id <span class="er-type">idx · str</span></div>
+              <div class="er-field">full_name <span class="er-type">str</span></div>
+              <div class="er-field">phone_number <span class="er-type">str</span></div>
+              <div class="er-field">roll_number <span class="er-type">str</span></div>
+              <div class="er-field">hostel <span class="er-type">str</span></div>
+              <div class="er-field">room_number <span class="er-type">str</span></div>
+              <div class="er-field">points <span class="er-type">int (default 0)</span></div>
+              <div class="er-field">is_staff <span class="er-type">bool</span></div>
+              <div class="er-field">is_security <span class="er-type">bool</span></div>
+              <div class="er-field">degree <span class="er-type">choice</span></div>
+              <div class="er-field">year_of_study <span class="er-type">int 1–6</span></div>
+              <div class="er-field">photo <span class="er-type">ImageField</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Help & Delivery -->
+      <div class="er-group">
+        <div class="er-group-title">Help &amp; Delivery</div>
+        <div class="er-entities">
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(255,209,102,0.15);color:var(--accent4);">HelpRequest</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">requester_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">helper_id <span class="er-type">FK → User (null)</span></div>
+              <div class="er-field">item_description <span class="er-type">str 300</span></div>
+              <div class="er-field">pickup_location <span class="er-type">choice [3]</span></div>
+              <div class="er-field">delivery_location <span class="er-type">str</span></div>
+              <div class="er-field">contact_number <span class="er-type">str (auto)</span></div>
+              <div class="er-field">from_time <span class="er-type">datetime</span></div>
+              <div class="er-field">duration <span class="er-type">choice [7]</span></div>
+              <div class="er-field">to_time <span class="er-type">datetime (computed)</span></div>
+              <div class="er-field">status <span class="er-type">choice [4] idx</span></div>
+              <div class="er-field">created_at <span class="er-type">auto</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Food Ordering -->
+      <div class="er-group">
+        <div class="er-group-title">Food Ordering</div>
+        <div class="er-entities">
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">Outlet</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">name <span class="er-type">UQ · str</span></div>
+              <div class="er-field">description <span class="er-type">text</span></div>
+              <div class="er-field">image <span class="er-type">str URL</span></div>
+              <div class="er-field">is_active <span class="er-type">bool</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">MenuItem</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">outlet_id <span class="er-type">FK → Outlet</span></div>
+              <div class="er-field">name <span class="er-type">str 100</span></div>
+              <div class="er-field">price <span class="er-type">decimal</span></div>
+              <div class="er-field">is_veg <span class="er-type">bool</span></div>
+              <div class="er-field">is_available <span class="er-type">bool</span></div>
+              <div class="er-field">image_upload <span class="er-type">ImageField</span></div>
+              <div class="er-field">image_url <span class="er-type">str</span></div>
+              <div class="er-field">avg_rating <span class="er-type">decimal (computed)</span></div>
+              <div class="er-field">review_count <span class="er-type">int (computed)</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">OutletAdmin</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">user_id <span class="er-type">O2O → User</span></div>
+              <div class="er-field fk">outlet_id <span class="er-type">FK → Outlet</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">FoodOrder</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">user_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">outlet_id <span class="er-type">FK → Outlet</span></div>
+              <div class="er-field">status <span class="er-type">choice [8] idx</span></div>
+              <div class="er-field">order_type <span class="er-type">DELIVERY|TAKEAWAY</span></div>
+              <div class="er-field">total_price <span class="er-type">decimal</span></div>
+              <div class="er-field">delivery_location <span class="er-type">choice (nullable)</span></div>
+              <div class="er-field">payment_method <span class="er-type">COD (fixed)</span></div>
+              <div class="er-field">reviewed <span class="er-type">bool</span></div>
+              <div class="er-field">user_full_name <span class="er-type">snapshot</span></div>
+              <div class="er-field">user_phone_number <span class="er-type">snapshot</span></div>
+              <div class="er-field">user_email <span class="er-type">snapshot</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">FoodOrderItem</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">order_id <span class="er-type">FK → FoodOrder</span></div>
+              <div class="er-field fk">food_item_id <span class="er-type">FK → MenuItem (PROTECT)</span></div>
+              <div class="er-field">quantity <span class="er-type">int 1–5</span></div>
+              <div class="er-field">price <span class="er-type">decimal (snapshot)</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(66,153,225,0.15);color:var(--blue);">Review</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">user_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">food_item_id <span class="er-type">FK → MenuItem</span></div>
+              <div class="er-field fk">order_id <span class="er-type">FK → FoodOrder</span></div>
+              <div class="er-field uk">rating <span class="er-type">1–5</span></div>
+              <div class="er-field uk">UQ(user,order,food_item) <span class="er-type"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mess Module -->
+      <div class="er-group">
+        <div class="er-group-title">Mess Module</div>
+        <div class="er-entities">
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(0,212,170,0.12);color:var(--accent2);">MessHostelSettings</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">hostel <span class="er-type">UQ · choice[21]</span></div>
+              <div class="er-field">monthly_sma <span class="er-type">decimal (semester)</span></div>
+              <div class="er-field">breakfast/lunch/snacks/dinner _deduction <span class="er-type">decimal ×4</span></div>
+              <div class="er-field">guest_*_price <span class="er-type">decimal ×4</span></div>
+              <div class="er-field">guest_slot_daily_limit <span class="er-type">int (50)</span></div>
+              <div class="er-field">guest_student_slot_limit <span class="er-type">int (10)</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(0,212,170,0.12);color:var(--accent2);">MessAdminProfile</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">user_id <span class="er-type">O2O → User</span></div>
+              <div class="er-field">hostel <span class="er-type">choice[21]</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(0,212,170,0.12);color:var(--accent2);">DailyMenu</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">hostel + date + meal_type <span class="er-type">UQ together</span></div>
+              <div class="er-field fk">updated_by_id <span class="er-type">FK → User (null)</span></div>
+              <div class="er-field">items <span class="er-type">text</span></div>
+              <div class="er-field">updated_at <span class="er-type">auto_now</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(0,212,170,0.12);color:var(--accent2);">GuestCouponPurchase</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">student_id <span class="er-type">FK → User</span></div>
+              <div class="er-field">hostel <span class="er-type">str</span></div>
+              <div class="er-field">date <span class="er-type">date idx</span></div>
+              <div class="er-field">meal_type <span class="er-type">choice[4]</span></div>
+              <div class="er-field">quantity <span class="er-type">int ≥1</span></div>
+              <div class="er-field">unit_price / total_amount <span class="er-type">decimal</span></div>
+              <div class="er-field">roll_number / room_number <span class="er-type">snapshot</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(0,212,170,0.12);color:var(--accent2);">RebateRequest</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">student_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">reviewed_by_id <span class="er-type">FK → User (null)</span></div>
+              <div class="er-field">hostel <span class="er-type">str (auto from user)</span></div>
+              <div class="er-field">start_date / end_date <span class="er-type">date</span></div>
+              <div class="er-field">days <span class="er-type">int 1–15 (computed)</span></div>
+              <div class="er-field">reason <span class="er-type">text</span></div>
+              <div class="er-field">status <span class="er-type">PENDING|APPROVED|REJECTED</span></div>
+              <div class="er-field">admin_note / reviewed_at <span class="er-type">on review</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lost & Found -->
+      <div class="er-group">
+        <div class="er-group-title">Lost &amp; Found</div>
+        <div class="er-entities">
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(237,100,106,0.12);color:var(--accent3);">LFItem</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">reporter_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">category_id <span class="er-type">FK → LFCategory (null)</span></div>
+              <div class="er-field">item_type <span class="er-type">LOST|FOUND idx</span></div>
+              <div class="er-field">status <span class="er-type">AVAILABLE|PENDING|RESOLVED idx</span></div>
+              <div class="er-field">title <span class="er-type">str 200</span></div>
+              <div class="er-field">tags <span class="er-type">JSONField (list, max 15)</span></div>
+              <div class="er-field">location_name <span class="er-type">campus key</span></div>
+              <div class="er-field">latitude / longitude <span class="er-type">float (opt)</span></div>
+              <div class="er-field">contact_type <span class="er-type">ME|SECURITY</span></div>
+              <div class="er-field">roll_number <span class="er-type">ID card case</span></div>
+              <div class="er-field">image / image_url <span class="er-type">upload priority</span></div>
+              <div class="er-field">date_reported <span class="er-type">auto</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(237,100,106,0.12);color:var(--accent3);">LFClaim</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">item_id <span class="er-type">FK → LFItem</span></div>
+              <div class="er-field fk">claimant_id <span class="er-type">FK → User</span></div>
+              <div class="er-field">status <span class="er-type">PENDING|RESOLVED|CANCELLED</span></div>
+              <div class="er-field uk">UQ(item) where status=PENDING <span class="er-type">DB constraint</span></div>
+              <div class="er-field">message <span class="er-type">text</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(237,100,106,0.12);color:var(--accent3);">LFCategory</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field uk">name <span class="er-type">UQ</span></div>
+              <div class="er-field">icon <span class="er-type">str emoji</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(237,100,106,0.12);color:var(--accent3);">LFNotification</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">user_id <span class="er-type">FK → User</span></div>
+              <div class="er-field fk">item_id <span class="er-type">FK → LFItem (null)</span></div>
+              <div class="er-field">message <span class="er-type">text</span></div>
+              <div class="er-field">is_read <span class="er-type">bool idx</span></div>
+            </div>
+          </div>
+          <div class="er-entity">
+            <div class="er-entity-head" style="background:rgba(237,100,106,0.12);color:var(--accent3);">LFLog</div>
+            <div class="er-entity-body">
+              <div class="er-field pk">id <span class="er-type">PK</span></div>
+              <div class="er-field fk">item_id <span class="er-type">FK → LFItem</span></div>
+              <div class="er-field fk">actor_id <span class="er-type">FK → User (null)</span></div>
+              <div class="er-field">action <span class="er-type">POSTED|CLAIMED|EDITED|RESOLVED|REVERTED</span></div>
+              <div class="er-field">detail <span class="er-type">text</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /er-diagram -->
+
+    <div class="rationale">
+      <p>
+        <strong>Denormalized snapshots on FoodOrder</strong> (user_full_name, user_phone_number, user_email) and FoodOrderItem (price) — order records must be immutable after creation even if the user edits their profile or the outlet changes the price. This is standard e-commerce practice.<br/><br/>
+        <strong>DB-level UniqueConstraint on LFClaim (status=PENDING)</strong> — rather than trusting application-level checks under concurrent traffic, a partial unique index at the DB layer guarantees only one pending interaction per LFItem ever exists. Race conditions handled by catching IntegrityError in the view.<br/><br/>
+        <strong>JSONField for tags</strong> — tags are a flat list of strings with no cross-item relational queries needed. A JSONField avoids a separate Tag table and join while Django's <code>__icontains</code> still works for search. If tag analytics became more complex, a proper M2M table would be warranted.
+      </p>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- 4. APIs -->
+  <div class="section" id="apis">
+    <h2>4. API Reference</h2>
+    <p>All endpoints under <code>/api/</code>. Authentication via <code>Authorization: Bearer &lt;Keycloak JWT&gt;</code> except the bot endpoint.</p>
+
+    <h3 style="margin-top:1.5rem;">Auth &amp; Profile</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/auth/me/</code></td><td><span class="badge badge-blue">Authenticated</span></td><td>Get own profile with role flags (is_outlet_admin, is_mess_admin, etc.)</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/auth/me/</code></td><td><span class="badge badge-blue">Authenticated</span></td><td>Update profile fields (full_name, phone, hostel, degree, photo…)</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/bot/link-phone/</code></td><td><span class="badge badge-orange">Bot Secret</span></td><td>Link Telegram chat_id to a user by phone number (last 10 digits match)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Help &amp; Delivery</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/help/</code></td><td><span class="badge badge-blue">Any User</span></td><td>List PENDING requests sorted by proximity. Accepts <code>?lat=&lng=</code></td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/help/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Create help request (pickup, delivery location, from_time HH:MM, duration)</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/help/{id}/</code></td><td><span class="badge badge-green">Requester only</span></td><td>Edit PENDING request fields</td></tr>
+          <tr><td><span class="method DELETE">DELETE</span></td><td><code>/api/help/{id}/</code></td><td><span class="badge badge-green">Requester only</span></td><td>Delete PENDING request</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/help/{id}/accept/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Accept request. Requires latitude+longitude. Enforces 200m radius.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/help/{id}/complete/</code></td><td><span class="badge badge-green">Requester only</span></td><td>Mark ACCEPTED request as COMPLETED. Awards +1 point to helper.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/help/mine/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Active requests where user is requester or helper</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/help/history/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Completed/expired requests involving user</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/help/admin_list/</code></td><td><span class="badge badge-red">Staff only</span></td><td>All requests regardless of status</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Food Ordering — Customer</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/outlets/</code></td><td><span class="badge badge-blue">Any User</span></td><td>List all active outlets</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/outlets/{id}/menu/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Menu items with filters: search, is_veg, available_only, sort_by</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/orders/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Place order. Items validated for outlet membership + availability. Price snapshotted.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/orders/pending/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Active + terminal-unreviewed orders</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/orders/history/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Reviewed terminal + cancelled orders</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/orders/{id}/</code></td><td><span class="badge badge-blue">Owner only</span></td><td>Track single order</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/orders/{id}/cancel/</code></td><td><span class="badge badge-blue">Owner only</span></td><td>Cancel only if PENDING</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/orders/{id}/review/</code></td><td><span class="badge badge-blue">Owner only</span></td><td>Submit ratings for every item. Order must be DELIVERED/TOOK and unreviewd.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Food Ordering — Outlet Admin</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/admin/menu/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>List own outlet's menu items</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/admin/menu/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Add menu item to own outlet. price must be &gt; 0.</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/food/admin/menu/{id}/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Update menu item (own outlet only)</td></tr>
+          <tr><td><span class="method DELETE">DELETE</span></td><td><code>/api/food/admin/menu/{id}/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Delete menu item</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/admin/orders/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>All orders for own outlet</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/admin/orders/{id}/accept/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>PENDING → ACCEPTED</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/food/admin/orders/{id}/cancel/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Cancel any non-DELIVERED order</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/food/admin/orders/{id}/status/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Advance status per strict lifecycle (delivery vs takeaway)</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/analytics/hostel-wise/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Delivery orders grouped by delivery location</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/analytics/top-food-items/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Items ranked by total quantity sold</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/analytics/time-wise/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Orders by hour of day (0–23)</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/food/analytics/daily-sales/</code></td><td><span class="badge badge-orange">Outlet Admin</span></td><td>Daily order count + revenue for last 30 days</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Mess Module</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/settings/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Get hostel settings (auto-created with defaults). Query: <code>?hostel=</code></td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/mess/settings/</code></td><td><span class="badge badge-orange">Mess Admin</span></td><td>Update deduction rates, guest prices, limits for own hostel</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/menu/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Get all 4 meal slots for a hostel+date. Always returns 4 rows (stubs if empty).</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/mess/menu/</code></td><td><span class="badge badge-orange">Mess Admin</span></td><td>Upsert one meal slot for own hostel</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/sma/</code></td><td><span class="badge badge-blue">Any User</span></td><td>SMA balance breakdown for current semester. Admin: add <code>?user_id=</code></td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/coupons/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Student: own purchases. Admin: own hostel purchases with date filter.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/mess/coupons/</code></td><td><span class="badge badge-blue">Student</span></td><td>Purchase guest coupons. Validates student limit (10) and slot total limit (50).</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/rebates/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Student: own rebates. Admin: all rebates for their hostel. Filterable by status.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/mess/rebates/</code></td><td><span class="badge badge-blue">Student</span></td><td>Submit rebate request. 1–15 days. hostel auto-set from user.hostel.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/mess/rebates/{id}/review/</code></td><td><span class="badge badge-orange">Mess Admin</span></td><td>Approve or reject. Only PENDING requests. Only own hostel's students.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/mess/analytics/</code></td><td><span class="badge badge-orange">Mess Admin</span></td><td>Current month: coupon revenue, count, rebate stats, per-meal breakdown</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Lost &amp; Found</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Who</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Filter by type, status, category, q, tags, lat/lng. Distance annotated.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/items/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Report lost/found item. GPS auto-resolves to nearest campus location.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/{id}/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Item detail with claim info and interaction contacts</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/lf/items/{id}/</code></td><td><span class="badge badge-green">Reporter only</span></td><td>Edit AVAILABLE items only</td></tr>
+          <tr><td><span class="method DELETE">DELETE</span></td><td><code>/api/lf/items/{id}/</code></td><td><span class="badge badge-green">Reporter only</span></td><td>Delete AVAILABLE items only</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/items/{id}/interact/</code></td><td><span class="badge badge-blue">Non-reporter</span></td><td>Claim/found-it. Only 1 PENDING per item (DB constraint). Status → PENDING.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/items/{id}/resolve/</code></td><td><span class="badge badge-green">Reporter/Security</span></td><td>Mark resolved. contact_type=SECURITY → security only. Status → RESOLVED.</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/items/{id}/revert/</code></td><td><span class="badge badge-green">Reporter/Security</span></td><td>Cancel interaction, item back to AVAILABLE</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/{id}/suggestions/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Top 10 matching opposite-type items by tag/category/title score</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/my_items/</code></td><td><span class="badge badge-blue">Any User</span></td><td>All items reported by current user</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/pending_items/</code></td><td><span class="badge badge-blue">Any User</span></td><td>PENDING items involving user. Security sees all pending.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/history_items/</code></td><td><span class="badge badge-blue">Any User</span></td><td>RESOLVED items involving user. Security sees all resolved.</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/items/top_tags/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Top 20 tags from AVAILABLE items</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/categories/</code></td><td><span class="badge badge-blue">Any User</span></td><td>All categories with available item count</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/my-claims/</code></td><td><span class="badge badge-blue">Any User</span></td><td>All claims made by current user</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/analytics/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Type counts, status counts, top categories, locations, tags</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/analytics/top-lost-locations/</code></td><td><span class="badge badge-red">Security only</span></td><td>Locations ranked by LOST item count</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/analytics/top-lost-categories/</code></td><td><span class="badge badge-red">Security only</span></td><td>Categories ranked by LOST item count</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/lf/notifications/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Own notifications (max 60)</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/notifications/{id}/read/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Mark single notification as read</td></tr>
+          <tr><td><span class="method POST">POST</span></td><td><code>/api/lf/notifications/mark_all_read/</code></td><td><span class="badge badge-blue">Any User</span></td><td>Bulk mark all as read</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">Admin Master Console (Staff only)</h3>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/stats/</code></td><td>Global stats: user count, staff, mess admins, outlet admins, orders, coupons, rebates…</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/users/</code></td><td>All users list with role info</td></tr>
+          <tr><td><span class="method PATCH">PATCH</span></td><td><code>/api/console/users/{id}/</code></td><td>Update any user (role flags, profile)</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/outlets/</code></td><td>All food outlets CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/outlet-admins/</code></td><td>Manage outlet-admin assignments</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/orders/</code></td><td>All food orders across all outlets</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/menus/</code></td><td>All mess menus CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/coupons/</code></td><td>All coupon purchases</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/rebates/</code></td><td>All rebate requests</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/settings/</code></td><td>All mess hostel settings</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/console/hostels/</code></td><td>Hostel listing CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/contacts/faculty/</code></td><td>Faculty directory CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/contacts/departments/</code></td><td>Department listing CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/contacts/emergency/</code></td><td>Emergency contacts CRUD</td></tr>
+          <tr><td><span class="method GET">GET</span></td><td><code>/api/doctors/schedule/</code></td><td>Cached doctor schedule from external source</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- 5. TRADE-OFFS -->
+  <div class="section" id="tradeoffs">
+    <h2>5. Design Choices &amp; Trade-offs</h2>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">SSO via Keycloak vs. Django-native Auth</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Identity layer decision</p>
+        </div>
+        <span class="badge badge-green">Chosen: Keycloak</span>
+      </div>
+      <div class="tradeoff-versus">
+        <div class="vs-col chosen">
+          <div class="vs-label chosen-label">✓ Keycloak (chosen)</div>
+          <ul>
+            <li>Out-of-the-box OIDC, password policy, brute-force protection</li>
+            <li>Django stays stateless — only validates JWT on each request</li>
+            <li>Key rotation handled automatically via JWKS + PyJWKClient cache (5 min)</li>
+            <li>Roles synced from Keycloak realm to Django on every request</li>
+            <li>Custom login theme possible (campusone Keycloak theme folder exists)</li>
+          </ul>
+        </div>
+        <div class="vs-divider">vs</div>
+        <div class="vs-col not-chosen">
+          <div class="vs-label alt-label">Django Session / SimpleJWT</div>
+          <ul>
+            <li>Simpler to set up initially</li>
+            <li>No external dependency</li>
+            <li>But: must build password reset, email verify, brute-force yourself</li>
+            <li>No centralized SSO for future services (bot, mobile app)</li>
+            <li>Harder to add LDAP / institutional SSO later</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">Two-Layer Role Model vs. Full Keycloak RBAC</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Authorization granularity</p>
+        </div>
+        <span class="badge badge-green">Chosen: Hybrid</span>
+      </div>
+      <div class="tradeoff-versus">
+        <div class="vs-col chosen">
+          <div class="vs-label chosen-label">✓ Coarse in Keycloak + Fine in Django DB</div>
+          <ul>
+            <li>Keycloak realm roles: <code>campus-staff</code>, <code>campus-security</code> (is_staff, is_security)</li>
+            <li>Fine: OutletAdmin (one-to-one user→outlet), MessAdminProfile (user→hostel) live in Django DB</li>
+            <li>Admin console can change outlet/hostel assignments without touching Keycloak</li>
+            <li>Per-request DB check is fast (indexed FK lookup)</li>
+          </ul>
+        </div>
+        <div class="vs-divider">vs</div>
+        <div class="vs-col not-chosen">
+          <div class="vs-label alt-label">Full Keycloak RBAC (client roles per outlet)</div>
+          <ul>
+            <li>Would need a Keycloak client role per outlet (e.g. outlet_admin_aromas)</li>
+            <li>Adding a new outlet requires Keycloak admin action, not just a DB row</li>
+            <li>Harder to manage programmatically from Django admin console</li>
+            <li>More coupling to Keycloak internal concepts</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">DB-Level Partial Unique Constraint for LF Claims vs. Application Lock</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Concurrency in Lost &amp; Found</p>
+        </div>
+        <span class="badge badge-green">Chosen: DB Constraint</span>
+      </div>
+      <div class="tradeoff-versus">
+        <div class="vs-col chosen">
+          <div class="vs-label chosen-label">✓ UniqueConstraint(item, condition=status='PENDING') + select_for_update</div>
+          <ul>
+            <li>Only ONE pending claim per item enforced at DB level — can't be bypassed by app bugs or concurrent workers</li>
+            <li>IntegrityError caught in view → clean 409 response</li>
+            <li>select_for_update row-locks the LFItem to prevent double-status updates</li>
+            <li>Correct under multiple Gunicorn workers or async requests</li>
+          </ul>
+        </div>
+        <div class="vs-divider">vs</div>
+        <div class="vs-col not-chosen">
+          <div class="vs-label alt-label">Application-level check only</div>
+          <ul>
+            <li>Simple: check if PENDING claim exists before creating</li>
+            <li>Race condition: two requests can both pass the check and both create</li>
+            <li>Would require Redis distributed lock or advisory lock to fix safely</li>
+            <li>More moving parts</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">Price + User Info Snapshots on Order vs. FK References</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Order immutability</p>
+        </div>
+        <span class="badge badge-green">Chosen: Snapshot</span>
+      </div>
+      <div class="tradeoff-versus">
+        <div class="vs-col chosen">
+          <div class="vs-label chosen-label">✓ Snapshot fields on FoodOrder + FoodOrderItem</div>
+          <ul>
+            <li>FoodOrderItem.price = snapshot of MenuItem.price at order time</li>
+            <li>FoodOrder.user_full_name/phone/email = snapshot at order time</li>
+            <li>Historical records stay accurate even if user changes profile or outlet changes price</li>
+            <li>Standard e-commerce pattern (Stripe, Shopify all do this)</li>
+          </ul>
+        </div>
+        <div class="vs-divider">vs</div>
+        <div class="vs-col not-chosen">
+          <div class="vs-label alt-label">Always join to live User / MenuItem</div>
+          <ul>
+            <li>Simpler schema — no duplicate data</li>
+            <li>But: if outlet admin changes price, all past orders reflect new price</li>
+            <li>If user deletes account, order history loses display data</li>
+            <li>Not suitable for billing/audit trail</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">GPS Auto-Resolve vs. Free-text Location in Lost &amp; Found</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Location data quality</p>
+        </div>
+        <span class="badge badge-green">Chosen: Predefined keys + GPS fallback</span>
+      </div>
+      <div class="tradeoff-versus">
+        <div class="vs-col chosen">
+          <div class="vs-label chosen-label">✓ Predefined campus location keys + GPS haversine nearest-location</div>
+          <ul>
+            <li>location_name must be empty OR one of 30+ campus keys — enforced at serializer</li>
+            <li>If user submits GPS lat/lng instead of name → haversine to find nearest campus landmark</li>
+            <li>Consistent location strings → reliable grouping in analytics, suggestions</li>
+            <li>No misspellings ("libary" vs "library") corrupting analytics</li>
+          </ul>
+        </div>
+        <div class="vs-divider">vs</div>
+        <div class="vs-col not-chosen">
+          <div class="vs-label alt-label">Free-text location input</div>
+          <ul>
+            <li>User types anything → easier UX</li>
+            <li>But: analytics by location becomes unreliable (infinite variations)</li>
+            <li>Suggestions by location would break</li>
+            <li>Can't do distance calculations without structured coordinates</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">SQLite (dev) vs. PostgreSQL vs. Redis for Caching</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Storage choices</p>
+        </div>
+        <span class="badge badge-purple">Trade-off noted</span>
+      </div>
+      <div class="vs-col" style="margin-top:0.75rem; border: 1px solid var(--border);">
+        <div class="vs-label" style="color:var(--text-muted);">Current design and its implications</div>
+        <ul style="color:var(--text-muted); font-size:0.82rem; padding-left:1rem;">
+          <li><strong style="color:var(--text);">No Redis</strong> — JWKS keys are cached in-process (PyJWKClient, 5 min lifespan). Works fine for a single server. Under multi-worker/multi-server setup, each worker has its own JWKS cache — this is fine since JWKS is read-only. But per-user session state (if ever needed) would require Redis.</li>
+          <li><strong style="color:var(--text);">No Celery</strong> — Notification dispatch (LFNotification bulk_create, Telegram) is synchronous in the request-response cycle. For a small campus load this is fine. For scale, these should be moved to async tasks.</li>
+          <li><strong style="color:var(--text);">Media files on local FS</strong> — Profile photos, menu item images, LF item images are saved to <code>/media/</code>. Fine for a single server. For multi-server or cloud deploy, would need S3/object storage.</li>
+          <li><strong style="color:var(--text);">No pagination</strong> on some endpoints (LF notifications capped at 60, suggestions at 10, top_tags at 20) — explicit limits used instead of cursor pagination. Acceptable for a campus-scale system with bounded data.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tradeoff-card">
+      <div class="tradeoff-header">
+        <div>
+          <h3 style="margin:0;">Atomic DB Transactions for Critical Operations</h3>
+          <p style="margin:0.25rem 0 0; font-size:0.85rem;">Data consistency approach</p>
+        </div>
+        <span class="badge badge-green">Consistently applied</span>
+      </div>
+      <div class="vs-col" style="margin-top:0.75rem; border: 1px solid rgba(0,212,170,0.3);">
+        <div class="vs-label chosen-label">Where select_for_update + transaction.atomic() is used</div>
+        <table style="margin-top:0.5rem; font-size:0.8rem;">
+          <thead><tr><th>Operation</th><th>Why atomic</th></tr></thead>
+          <tbody>
+            <tr><td>Help request accept</td><td>Prevent two users accepting same request simultaneously; prevent double-accepting</td></tr>
+            <tr><td>Help request complete</td><td>Atomically update status + award points with F() expression</td></tr>
+            <tr><td>Place food order</td><td>Lock outlet + menu items; validate availability; create order + items atomically</td></tr>
+            <tr><td>Cancel food order</td><td>Lock order row; check status before cancelling</td></tr>
+            <tr><td>Admin order status advance</td><td>Lock order; validate transition; update</td></tr>
+            <tr><td>LF interact (claim)</td><td>Lock LFItem; re-check AVAILABLE; create claim (DB unique constraint as backstop)</td></tr>
+            <tr><td>LF resolve / revert</td><td>Atomically update claim status + item status + send notification</td></tr>
+            <tr><td>Submit review</td><td>Lock order; bulk create reviews; recompute avg_rating; mark reviewed=True</td></tr>
+            <tr><td>Guest coupon purchase</td><td>Validate limits + create coupon atomically</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="text-align:center; padding: 3rem 0 1rem; color: var(--text-dim); font-size: 0.8rem;">
+    CampusOne System Design · Generated from source: api/models.py · api/views.py · api/serializers.py · api/urls.py
+  </div>
+
+</div><!-- /container -->
+</body>
+</html>

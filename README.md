@@ -2,7 +2,7 @@
 
 A full-stack campus portal for IIT Bombay students — food ordering, lost & found, mess management, help & delivery, contacts, doctors, and a Telegram bot integration.
 
-**Stack:** React (Vite) · Django REST Framework · Keycloak (auth) · SQLite · Docker · Python Telegram Bot
+**Stack:** React (Vite) · Django REST Framework · Keycloak (auth) · PostgreSQL · Docker · Python Telegram Bot
 
 ---
 
@@ -55,7 +55,7 @@ Press `Ctrl+C` to stop everything cleanly.
 
 Use separate terminals for each service.
 
-#### 1. Docker (Keycloak + PostgreSQL)
+#### 1. Docker (Keycloak + App DB)
 
 ```bash
 docker compose up -d
@@ -64,6 +64,7 @@ chmod +x keycloak/setup-realm.sh && ./keycloak/setup-realm.sh
 ```
 
 Wait ~30s for Keycloak to be ready at http://localhost:8080.
+App DB (PostgreSQL) will be available at `localhost:5433`.
 
 #### 2. Django backend
 
@@ -118,6 +119,7 @@ Once running:
 | API | http://localhost:8000/api | Django REST |
 | Django Admin | http://localhost:8000/admin | Superuser login |
 | Keycloak Console | http://localhost:8080/admin | Identity provider |
+| App DB (PostgreSQL) | localhost:5433 | Django database (Docker) |
 
 **Default credentials:**
 
@@ -126,6 +128,7 @@ Once running:
 | Keycloak Admin | `admin` | `admin` |
 | Test Staff User | `campus_admin` | `Admin@123` |
 | Django Admin | `admin` (or chosen at first run) | `admin` (or chosen at first run) |
+| App DB (PostgreSQL) | `campusone` | `campusone_secret` (port `5433`) |
 
 ---
 
@@ -212,7 +215,7 @@ The startup script writes these automatically. Never commit them — they are in
 
 | File | Purpose |
 |---|---|
-| `backend/.env` | `TELEGRAM_BOT_SECRET` |
+| `backend/.env` | `TELEGRAM_BOT_SECRET`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` |
 | `bot/.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_SECRET`, `DJANGO_API_URL` |
 | `frontend/.env.local` | Keycloak URL, realm, client ID, API URL |
 
@@ -231,6 +234,8 @@ cp bot/.env.example bot/.env
 | Problem | Fix |
 |---|---|
 | `No module named 'dotenv'` | Forgot to activate venv: `source backend/venv/bin/activate` |
+| `No module named 'psycopg2'` | `pip install psycopg2-binary` inside backend venv |
+| `could not connect to server` (DB) | App DB container not running — `docker compose up -d` |
 | `APScheduler failed to start` | `pip install -r requirements.txt` inside backend venv |
 | Keycloak not reachable | `docker compose up -d` then wait 30s |
 | Redirect loop on login | Re-run `./keycloak/setup-realm.sh` |
@@ -248,9 +253,8 @@ Wipes everything — Docker volumes, databases, venvs, node_modules, caches, and
 ```bash
 # Stop all running services first (Ctrl+C if run.sh is active), then:
 
-docker compose down -v                          # stop containers + wipe Keycloak DB volume
+docker compose down -v                          # stop containers + wipe ALL DB volumes (Keycloak + App DB)
 
-rm -f backend/db.sqlite3                        # Django database
 rm -f backend/.env bot/.env frontend/.env.local # generated env files
 rm -f .campusone.log .campusone.pids            # log and PID files
 
@@ -277,7 +281,7 @@ Then start fresh:
 > **One-liner** (copy-paste the whole block):
 > ```bash
 > docker compose down -v && \
-> rm -f backend/db.sqlite3 backend/.env bot/.env frontend/.env.local .campusone.log .campusone.pids && \
+> rm -f backend/.env bot/.env frontend/.env.local .campusone.log .campusone.pids && \
 > rm -rf backend/venv bot/venv frontend/node_modules frontend/.vite frontend/dist && \
 > find . -not -path "*/node_modules/*" -not -path "*/.git/*" \
 >   \( -type d -name __pycache__ -o -name "*.pyc" \) \

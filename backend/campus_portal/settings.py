@@ -2,6 +2,7 @@
 Django settings for campus_portal project.
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -67,11 +68,16 @@ TEMPLATES = [
 WSGI_APPLICATION = 'campus_portal.wsgi.application'
 
 
-# Database
+# Database — PostgreSQL (app-db Docker service on port 5433)
+# Credentials are read from backend/.env (written automatically by run.sh)
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE':   'django.db.backends.postgresql',
+        'NAME':     os.environ.get('DB_NAME',     'campusone'),
+        'USER':     os.environ.get('DB_USER',     'campusone'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'campusone_secret'),
+        'HOST':     os.environ.get('DB_HOST',     'localhost'),
+        'PORT':     os.environ.get('DB_PORT',     '5433'),
     }
 }
 
@@ -131,7 +137,6 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 # Telegram Bot — shared secret for internal bot↔Django communication
 # ---------------------------------------------------------------------------
-import os
 TELEGRAM_BOT_SECRET = os.environ.get('TELEGRAM_BOT_SECRET', 'change-me-in-production')
 
 # ---------------------------------------------------------------------------

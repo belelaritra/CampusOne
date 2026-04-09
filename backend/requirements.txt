@@ -7,3 +7,4 @@ cryptography>=41.0
 requests>=2.31
 python-dotenv>=1.0
 apscheduler>=3.10
+psycopg2-binary>=2.9
