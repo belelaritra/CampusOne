@@ -45,6 +45,16 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0,10);
 }
 
+// Profile stores hostel as 'H14', 'Tansa', etc.
+// Mess API expects 'hostel_14', 'tansa_house', etc.
+function profileHostelToMessKey(profileHostel) {
+  if (!profileHostel) return '';
+  if (profileHostel === 'Tansa') return 'tansa_house';
+  const m = profileHostel.match(/^H(\d+)$/i);
+  if (m) return `hostel_${m[1]}`;
+  return ''; // Natraj, GH1, GH2 — not mess hostels
+}
+
 // ---------------------------------------------------------------------------
 // UI primitives
 // ---------------------------------------------------------------------------
@@ -603,7 +613,8 @@ function StudentDashboard({ user }) {
     ['sma',     '💰 My SMA'],
   ];
   const [tab, setTab] = useState('menu');
-  const hostel = user?.hostel || '';
+  // user.hostel is in profile format ('H14'); mess API needs 'hostel_14'
+  const hostel = profileHostelToMessKey(user?.hostel);
 
   return (
     <div>
