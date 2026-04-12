@@ -46,9 +46,13 @@ class User(AbstractUser):
 # ---------------------------------------------------------------------------
 
 PICKUP_CHOICES = [
-    ('gulmohar',    'Gulmohar'),
-    ('main_gate',   'Main Gate'),
-    ('shree_balaji','Shree Balaji Fruit & Vegetable'),
+    ('gulmohar',         'Gulmohar'),
+    ('main_gate',        'Main Gate'),
+    ('cafe92',           'Cafe92'),
+    ('chaayos',          'Chaayos'),
+    ('amul_parlour_h14', 'Amul Parlour H14'),
+    ('krishna_gymkhana', 'Krishna Juice/Soup/Salad (Gymkhana)'),
+    ('print_house_h5',   'The Print House H5 Xerox'),
 ]
 
 DURATION_CHOICES = [

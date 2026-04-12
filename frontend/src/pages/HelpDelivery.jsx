@@ -12,9 +12,17 @@ import {
 // Constants (must match backend)
 // ---------------------------------------------------------------------------
 const PICKUP_OPTIONS = [
-  { value: 'gulmohar',     label: 'Gulmohar' },
-  { value: 'main_gate',   label: 'Main Gate' },
-  { value: 'shree_balaji',label: 'Shree Balaji Fruit & Vegetable' },
+  { group: 'Food & Beverages', items: [
+    { value: 'gulmohar',         label: 'Gulmohar' },
+    { value: 'cafe92',           label: 'Cafe92' },
+    { value: 'chaayos',          label: 'Chaayos' },
+    { value: 'amul_parlour_h14', label: 'Amul Parlour H14' },
+    { value: 'krishna_gymkhana', label: 'Krishna Juice/Soup/Salad (Gymkhana)' },
+  ]},
+  { group: 'Services & General', items: [
+    { value: 'main_gate',        label: 'Main Gate' },
+    { value: 'print_house_h5',   label: 'The Print House H5 Xerox' },
+  ]},
 ];
 
 const DELIVERY_OPTIONS = [
@@ -323,7 +331,11 @@ function HelpForm({ initial = EMPTY_FORM, onSave, onCancel, isEdit = false }) {
           <select name="pickup_location" className="category-select" required
             value={form.pickup_location} onChange={handle}>
             <option value="">Select pickup</option>
-            {PICKUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {PICKUP_OPTIONS.map(g => (
+              <optgroup key={g.group} label={g.group}>
+                {g.items.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </optgroup>
+            ))}
           </select>
         </div>
         <div className="form-group">

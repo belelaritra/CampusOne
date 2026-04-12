@@ -193,11 +193,16 @@ class HelpRequestSerializer(serializers.ModelSerializer):
 
     def get_contact_number(self, obj):
         request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            if obj.requester_id == request.user.id or (
-                obj.helper_id and obj.helper_id == request.user.id
-            ):
-                return obj.contact_number
+        if not (request and request.user.is_authenticated):
+            return None
+        uid = request.user.id
+        # Helper sees the requester's stored contact number
+        if obj.helper_id and obj.helper_id == uid:
+            return obj.contact_number
+        # Requester sees the helper's phone number (once someone has accepted)
+        if obj.requester_id == uid:
+            if obj.helper_id and obj.helper:
+                return obj.helper.phone_number or obj.helper.phone or None
         return None
 
     def get_distance_in_meters(self, obj):

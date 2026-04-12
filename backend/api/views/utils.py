@@ -14,11 +14,15 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# Exact GPS coordinates for the three fixed Help & Delivery pickup points
+# Exact GPS coordinates for Help & Delivery pickup points
 PICKUP_COORDS = {
-    'main_gate':    (19.12845641460189,  72.91926132752846),
-    'gulmohar':     (19.129814529274448, 72.91533444403758),
-    'shree_balaji': (19.135117507090506, 72.90574766165889),
+    'main_gate':        (19.12845641460189,  72.91926132752846),
+    'gulmohar':         (19.129930774054507, 72.91530251524777),
+    'cafe92':           (19.132282411641967, 72.91592484067587),
+    'chaayos':          (19.134664226301155, 72.91005150949856),
+    'amul_parlour_h14': (19.134984445324672, 72.90575474459186),
+    'krishna_gymkhana': (19.13370374695397,  72.91160567561887),
+    'print_house_h5':   (19.13541540495572,  72.9099437817388),
 }
 
 ACCEPT_RADIUS_METRES = 200
