@@ -1,0 +1,324 @@
+// ============================================================
+//  CampusOne — Entity Relationship Diagram
+//  dbdiagram.io  |  paste at https://dbdiagram.io/d
+// ============================================================
+
+// ── USER ─────────────────────────────────────────────────────
+Table User [headercolor: #1565C0] {
+  id              integer     [pk, increment]
+  username        varchar     [not null, unique]
+  email           varchar     [not null]
+  full_name       varchar
+  phone_number    varchar
+  roll_number     varchar
+  hostel          varchar
+  room_number     varchar
+  points          integer     [default: 0]
+  is_security     boolean     [default: false]
+  degree          varchar
+  course          varchar
+  year_of_study   integer
+  keycloak_id     varchar
+  telegram_chat_id varchar
+}
+
+// ── HELP & DELIVERY ──────────────────────────────────────────
+Table HelpRequest [headercolor: #00838F] {
+  id                integer   [pk, increment]
+  requester_id      integer   [not null, ref: > User.id]
+  helper_id         integer   [ref: > User.id]
+  item_description  varchar   [not null]
+  pickup_location   varchar   [not null]
+  delivery_location varchar   [not null]
+  contact_number    varchar
+  additional_info   text
+  from_time         datetime  [not null]
+  to_time           datetime  [not null]
+  duration          integer   [default: 30]
+  status            varchar   [default: "PENDING", note: "PENDING | ACCEPTED | COMPLETED | EXPIRED"]
+  created_at        datetime  [default: `now()`]
+}
+
+// ── FOOD ORDERING — OUTLETS & MENU ───────────────────────────
+Table Outlet [headercolor: #E65100] {
+  id          integer   [pk, increment]
+  name        varchar   [not null, unique]
+  description text
+  image       varchar
+  is_active   boolean   [default: true]
+  created_at  datetime  [default: `now()`]
+}
+
+Table MenuItem [headercolor: #E65100] {
+  id            integer   [pk, increment]
+  outlet_id     integer   [not null, ref: > Outlet.id]
+  name          varchar   [not null]
+  price         decimal   [not null]
+  description   text
+  is_veg        boolean   [default: true]
+  is_available  boolean   [default: true]
+  avg_rating    decimal   [default: 0.00]
+  review_count  integer   [default: 0]
+  created_at    datetime  [default: `now()`]
+}
+
+Table OutletAdmin [headercolor: #E65100] {
+  id        integer [pk, increment]
+  user_id   integer [not null, unique, ref: - User.id]
+  outlet_id integer [not null, ref: > Outlet.id]
+}
+
+// ── FOOD ORDERING — ORDERS ───────────────────────────────────
+Table FoodOrder [headercolor: #F9A825] {
+  id                integer   [pk, increment]
+  user_id           integer   [not null, ref: > User.id]
+  outlet_id         integer   [not null, ref: > Outlet.id]
+  status            varchar   [default: "PENDING", note: "PENDING | ACCEPTED | PREPARING | OUT_FOR_DELIVERY | READY | DELIVERED | TOOK | CANCELLED"]
+  order_type        varchar   [default: "DELIVERY", note: "DELIVERY | TAKEAWAY"]
+  total_price       decimal   [not null]
+  delivery_location varchar
+  payment_method    varchar   [default: "COD"]
+  reviewed          boolean   [default: false]
+  user_full_name    varchar
+  user_phone_number varchar
+  user_email        varchar
+  created_at        datetime  [default: `now()`]
+  updated_at        datetime
+}
+
+Table FoodOrderItem [headercolor: #F9A825] {
+  id           integer [pk, increment]
+  order_id     integer [not null, ref: > FoodOrder.id]
+  food_item_id integer [not null, ref: > MenuItem.id]
+  quantity     integer [not null]
+  price        decimal [not null]
+}
+
+Table Review [headercolor: #F9A825] {
+  id           integer  [pk, increment]
+  user_id      integer  [not null, ref: > User.id]
+  food_item_id integer  [not null, ref: > MenuItem.id]
+  order_id     integer  [not null, ref: > FoodOrder.id]
+  rating       integer  [not null, note: "1 to 5"]
+  created_at   datetime [default: `now()`]
+
+  indexes {
+    (user_id, order_id, food_item_id) [unique]
+  }
+}
+
+// ── LOST & FOUND ─────────────────────────────────────────────
+Table LFCategory [headercolor: #2E7D32] {
+  id   integer [pk, increment]
+  name varchar [not null, unique]
+  icon varchar [default: "📦"]
+}
+
+Table LFItem [headercolor: #2E7D32] {
+  id            integer   [pk, increment]
+  reporter_id   integer   [not null, ref: > User.id]
+  category_id   integer   [ref: > LFCategory.id]
+  item_type     varchar   [not null, note: "LOST | FOUND"]
+  status        varchar   [default: "AVAILABLE", note: "AVAILABLE | PENDING | RESOLVED"]
+  title         varchar   [not null]
+  description   text
+  tags          json
+  location_name varchar
+  latitude      float
+  longitude     float
+  contact_type  varchar   [default: "ME", note: "ME | SECURITY"]
+  roll_number   varchar
+  date_reported datetime  [default: `now()`]
+}
+
+Table LFClaim [headercolor: #2E7D32] {
+  id         integer  [pk, increment]
+  item_id    integer  [not null, ref: > LFItem.id]
+  claimant_id integer [not null, ref: > User.id]
+  message    text
+  status     varchar  [default: "PENDING", note: "PENDING | RESOLVED | CANCELLED"]
+  created_at datetime [default: `now()`]
+}
+
+Table LFNotification [headercolor: #2E7D32] {
+  id         integer  [pk, increment]
+  user_id    integer  [not null, ref: > User.id]
+  item_id    integer  [ref: > LFItem.id]
+  message    text     [not null]
+  is_read    boolean  [default: false]
+  created_at datetime [default: `now()`]
+}
+
+Table LFLog [headercolor: #2E7D32] {
+  id         integer  [pk, increment]
+  item_id    integer  [not null, ref: > LFItem.id]
+  actor_id   integer  [ref: > User.id]
+  action     varchar  [not null, note: "POSTED | CLAIMED | CLOSED | EDITED | HANDED_OVER"]
+  detail     text
+  created_at datetime [default: `now()`]
+}
+
+// ── MESS ─────────────────────────────────────────────────────
+Table MessHostelSettings [headercolor: #6A1B9A] {
+  id                       integer  [pk, increment]
+  hostel                   varchar  [not null, unique]
+  monthly_sma              decimal  [default: 27000]
+  breakfast_deduction      decimal  [default: 35]
+  lunch_deduction          decimal  [default: 40]
+  snacks_deduction         decimal  [default: 35]
+  dinner_deduction         decimal  [default: 40]
+  guest_breakfast_price    decimal  [default: 50]
+  guest_lunch_price        decimal  [default: 65]
+  guest_snacks_price       decimal  [default: 50]
+  guest_dinner_price       decimal  [default: 65]
+  guest_slot_daily_limit   integer  [default: 50]
+  guest_student_slot_limit integer  [default: 10]
+  updated_at               datetime
+}
+
+Table MessAdminProfile [headercolor: #6A1B9A] {
+  id      integer [pk, increment]
+  user_id integer [not null, unique, ref: - User.id]
+  hostel  varchar [not null]
+}
+
+Table DailyMenu [headercolor: #6A1B9A] {
+  id            integer  [pk, increment]
+  updated_by_id integer  [ref: > User.id]
+  hostel        varchar  [not null]
+  date          date     [not null]
+  meal_type     varchar  [not null, note: "BREAKFAST | LUNCH | SNACKS | DINNER"]
+  items         text
+  updated_at    datetime
+
+  indexes {
+    (hostel, date, meal_type) [unique]
+  }
+}
+
+Table GuestCouponPurchase [headercolor: #6A1B9A] {
+  id             integer  [pk, increment]
+  student_id     integer  [not null, ref: > User.id]
+  hostel         varchar  [not null]
+  date           date     [not null]
+  meal_type      varchar  [not null]
+  quantity       integer  [not null]
+  unit_price     decimal  [not null]
+  total_amount   decimal  [not null]
+  roll_number    varchar
+  room_number    varchar
+  hostel_number  varchar
+  purchased_at   datetime [default: `now()`]
+}
+
+Table RebateRequest [headercolor: #6A1B9A] {
+  id            integer  [pk, increment]
+  student_id    integer  [not null, ref: > User.id]
+  reviewed_by_id integer [ref: > User.id]
+  hostel        varchar  [not null]
+  start_date    date     [not null]
+  end_date      date     [not null]
+  days          integer  [not null]
+  reason        text
+  status        varchar  [default: "PENDING", note: "PENDING | APPROVED | REJECTED"]
+  admin_note    text
+  created_at    datetime [default: `now()`]
+  reviewed_at   datetime
+}
+
+// ── CAMPUS INFO ──────────────────────────────────────────────
+Table Hostel [headercolor: #AD1457] {
+  id              integer [pk, increment]
+  name            varchar [not null]
+  capacity        integer
+  occupancy       integer
+  warden_contact  varchar
+}
+
+Table Faculty [headercolor: #AD1457] {
+  id             integer  [pk, increment]
+  name           varchar  [not null]
+  department     varchar  [not null]
+  specialization varchar
+  email          varchar
+  cabin_no       varchar
+  is_available   boolean  [default: true]
+  created_at     datetime [default: `now()`]
+  updated_at     datetime
+}
+
+Table Department [headercolor: #AD1457] {
+  id               integer  [pk, increment]
+  name             varchar  [not null]
+  official_contact varchar
+  official_email   varchar
+  location         varchar
+  maps_url         varchar
+  created_at       datetime [default: `now()`]
+}
+
+// ── EMERGENCY & HEALTH ───────────────────────────────────────
+Table Doctor [headercolor: #B71C1C] {
+  id             integer [pk, increment]
+  name           varchar [not null]
+  specialization varchar
+  status         varchar [default: "available", note: "available | busy | unavailable"]
+  timings        varchar
+}
+
+Table EmergencyContact [headercolor: #B71C1C] {
+  id           integer [pk, increment]
+  service_name varchar [not null]
+  contact      varchar [not null]
+  order        integer [default: 0]
+  created_at   datetime [default: `now()`]
+}
+
+// ============================================================
+//  TABLE GROUPS
+// ============================================================
+
+TableGroup "User" {
+  User
+}
+
+TableGroup "Help & Delivery" {
+  HelpRequest
+}
+
+TableGroup "Food Ordering" {
+  Outlet
+  MenuItem
+  OutletAdmin
+  FoodOrder
+  FoodOrderItem
+  Review
+}
+
+TableGroup "Lost & Found" {
+  LFCategory
+  LFItem
+  LFClaim
+  LFNotification
+  LFLog
+}
+
+TableGroup "Mess Management" {
+  MessHostelSettings
+  MessAdminProfile
+  DailyMenu
+  GuestCouponPurchase
+  RebateRequest
+}
+
+TableGroup "Campus Info" {
+  Hostel
+  Faculty
+  Department
+  CampusEvent
+}
+
+TableGroup "Emergency & Health" {
+  Doctor
+  EmergencyContact
+}
